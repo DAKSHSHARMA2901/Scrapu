@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y \
     gnupg \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Google Chrome using modern approach (without apt-key)
+# Install Google Chrome using modern approach
 RUN mkdir -p /etc/apt/keyrings \
     && wget -q -O - https://dl.google.com/linux/linux_signing_key.pub > /etc/apt/keyrings/google-chrome.gpg \
     && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list \
@@ -40,16 +40,29 @@ RUN mkdir -p /etc/apt/keyrings \
     xdg-utils \
     && rm -rf /var/lib/apt/lists/*
 
-# Install ChromeDriver that matches Chrome version
-RUN CHROME_VERSION=$(google-chrome --version | grep -oP 'Google Chrome \K\d+') \
+# Install ChromeDriver using the new Chrome for Testing system
+RUN CHROME_VERSION=$(google-chrome --version | grep -oP 'Google Chrome \K\d+\.\d+\.\d+\.\d+') \
     && echo "Detected Chrome version: $CHROME_VERSION" \
-    && CHROMEDRIVER_VERSION=$(curl -s "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_$CHROME_VERSION") \
-    && echo "Matching ChromeDriver version: $CHROMEDRIVER_VERSION" \
+    && MAJOR_VERSION=$(echo $CHROME_VERSION | cut -d. -f1) \
+    && echo "Major version: $MAJOR_VERSION" \
+    # Try to get the exact version first
     && wget -q --continue -O /tmp/chromedriver-linux64.zip \
-       "https://chromedriver.storage.googleapis.com/$CHROMEDRIVER_VERSION/chromedriver-linux64.zip" \
-    && unzip /tmp/chromedriver-linux64.zip -d /usr/local/bin/ \
+       "https://edgedl.me.gvt1.com/edgedl/chrome/chrome-for-testing/${CHROME_VERSION}/linux64/chromedriver-linux64.zip" \
+    || wget -q --continue -O /tmp/chromedriver-linux64.zip \
+       "https://storage.googleapis.com/chrome-for-testing-public/${CHROME_VERSION}/linux64/chromedriver-linux64.zip" \
+    # If exact version fails, try major version
+    || wget -q --continue -O /tmp/chromedriver-linux64.zip \
+       "https://edgedl.me.gvt1.com/edgedl/chrome/chrome-for-testing/${MAJOR_VERSION}.0.0.0/linux64/chromedriver-linux64.zip" \
+    || wget -q --continue -O /tmp/chromedriver-linux64.zip \
+       "https://storage.googleapis.com/chrome-for-testing-public/${MAJOR_VERSION}.0.0.0/linux64/chromedriver-linux64.zip" \
+    # If all else fails, use a known working version
+    || (echo "Falling back to version 120.0.6099.109" \
+        && wget -q --continue -O /tmp/chromedriver-linux64.zip \
+           "https://storage.googleapis.com/chrome-for-testing-public/120.0.6099.109/linux64/chromedriver-linux64.zip") \
+    && unzip /tmp/chromedriver-linux64.zip -d /tmp/ \
+    && mv /tmp/chromedriver-linux64/chromedriver /usr/local/bin/ \
     && chmod +x /usr/local/bin/chromedriver \
-    && rm /tmp/chromedriver-linux64.zip \
+    && rm -rf /tmp/chromedriver-linux64.zip /tmp/chromedriver-linux64/ \
     && echo "ChromeDriver installed successfully"
 
 WORKDIR /app
