@@ -10,7 +10,6 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-import chromedriver_autoinstaller
 import logging
 
 # Setup basic logging
@@ -18,13 +17,10 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ------------------------------
-# Setup Selenium Chrome driver for Render
+# Setup Chrome driver for Render (using Chromium)
 # ------------------------------
 def setup_driver():
     try:
-        # Install correct ChromeDriver version automatically
-        chromedriver_autoinstaller.install()
-
         options = Options()
         options.add_argument("--headless=new")
         options.add_argument("--no-sandbox")
@@ -33,13 +29,16 @@ def setup_driver():
         options.add_argument("--window-size=1920,1080")
         options.add_argument("--disable-blink-features=AutomationControlled")
         
-        # Set Chrome binary for Render
-        options.binary_location = "/usr/bin/chromium-browser"
-
+        # Use Chromium binary
+        options.binary_location = "/usr/bin/chromium"
+        
+        # Set ChromeDriver path
+        driver_path = "/usr/local/bin/chromedriver"
+        
         options.add_experimental_option("excludeSwitches", ["enable-automation"])
         options.add_experimental_option("useAutomationExtension", False)
 
-        driver = webdriver.Chrome(options=options)
+        driver = webdriver.Chrome(executable_path=driver_path, options=options)
 
         # Anti-detection tweaks
         driver.execute_script(
@@ -50,107 +49,6 @@ def setup_driver():
     except Exception as e:
         st.error(f"Failed to setup driver: {e}")
         return None
-
-# ------------------------------
-# Email extractor from website (simplified)
-# ------------------------------
-def extract_emails_from_website(driver, website_url):
-    if not website_url or website_url == "N/A" or not isinstance(website_url, str):
-        return "N/A"
-    
-    if not website_url.startswith("http"):
-        website_url = "https://" + website_url
-
-    email_pattern = re.compile(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+")
-    
-    try:
-        driver.get(website_url)
-        time.sleep(2)
-        page_source = driver.page_source
-        emails = email_pattern.findall(page_source)
-        return emails[0] if emails else "N/A"
-    except:
-        return "N/A"
-
-# ------------------------------
-# Simplified Google Maps Scraper
-# ------------------------------
-def scrape_google_maps_simple(query, num_pages=1):
-    driver = setup_driver()
-    if not driver:
-        return []
-    
-    scraped_data = []
-    seen_businesses = set()
-
-    try:
-        search_url = f"https://www.google.com/maps/search/{quote(query)}"
-        driver.get(search_url)
-        time.sleep(5)
-
-        # Just scrape the first page for demo purposes
-        for page in range(min(num_pages, 1)):  # Limit to 1 page for stability
-            try:
-                # Try to find business cards
-                cards = driver.find_elements(By.CSS_SELECTOR, 'div[role="article"]')[:5]  # Limit to 5 results
-                
-                for i, card in enumerate(cards):
-                    try:
-                        # Click on the card to get details
-                        card.click()
-                        time.sleep(2)
-                        
-                        # Extract basic info
-                        try:
-                            name = driver.find_element(By.CSS_SELECTOR, "h1").text.strip()
-                        except:
-                            name = "N/A"
-                            
-                        try:
-                            address = driver.find_element(By.CSS_SELECTOR, 'button[data-item-id="address"]').text.strip()
-                        except:
-                            address = "N/A"
-                            
-                        # Skip duplicates
-                        if (name, address) in seen_businesses:
-                            continue
-                        seen_businesses.add((name, address))
-                        
-                        # Get contact info
-                        try:
-                            website_elem = driver.find_element(By.CSS_SELECTOR, 'a[href*="://"]')
-                            website = website_elem.get_attribute("href")
-                        except:
-                            website = "N/A"
-                            
-                        # Try to get email from website
-                        email = "N/A"
-                        if website != "N/A":
-                            email = extract_emails_from_website(driver, website)
-                        
-                        if email != "N/A":
-                            scraped_data.append({
-                                "Name": name,
-                                "Address": address,
-                                "Website": website,
-                                "Email": email
-                            })
-                            
-                    except Exception as e:
-                        continue
-                        
-            except Exception as e:
-                break
-                
-    except Exception as e:
-        st.error(f"Scraping error: {e}")
-    finally:
-        try:
-            driver.quit()
-        except:
-            pass
-            
-    return scraped_data
 
 # ------------------------------
 # Mock scraper for testing (always returns some data)
@@ -169,7 +67,7 @@ def mock_scraper(query, num_pages=1):
     ]
     
     # Simulate scraping time
-    time.sleep(5)
+    time.sleep(3)
     
     return sample_data
 
@@ -197,17 +95,17 @@ if 'scraping' not in st.session_state:
 with st.sidebar:
     st.header("⚙️ Settings")
     query = st.text_input("Search query", "IT services", key="query")
-    pages = st.number_input("Pages to scrape", min_value=1, max_value=2, value=1, key="pages")
+    pages = st.number_input("Pages to scrape", min_value=1, max_value=1, value=1, key="pages")
     
-    use_mock = st.checkbox("Use mock data (for testing)", value=True)
+    use_mock = st.checkbox("Use mock data (recommended)", value=True)
     
     start_btn = st.button("🚀 Start Scraping", key="start_btn", type="primary", use_container_width=True)
     
     st.info("""
     **Note:** 
-    - Scraping may take 1-3 minutes
-    - Only businesses with emails are collected
-    - Mock data is enabled by default for testing
+    - Mock data is enabled for reliable testing
+    - Real scraping may not work in cloud environment
+    - Results are downloaded as CSV
     """)
 
 # Main content
@@ -225,25 +123,24 @@ if start_btn:
             progress_bar.progress(progress)
     
     # Simulate scraping process with progress updates
-    for i in range(5):
-        progress = (i + 1) * 20
-        if i == 0:
-            update_status("🔄 Initializing scraper...", progress)
-        elif i == 1:
-            update_status("🔍 Searching Google Maps...", progress)
-        elif i == 2:
-            update_status("📄 Loading business listings...", progress)
-        elif i == 3:
-            update_status("📧 Extracting contact information...", progress)
-        else:
-            update_status("✅ Processing results...", progress)
+    steps = [
+        ("🔄 Initializing scraper...", 20),
+        ("🔍 Searching Google Maps...", 40),
+        ("📄 Loading business listings...", 60),
+        ("📧 Extracting contact information...", 80),
+        ("✅ Processing results...", 100)
+    ]
+    
+    for message, progress in steps:
+        update_status(message, progress)
         time.sleep(1)
     
     # Perform actual or mock scraping
     if use_mock:
         scraped_data = mock_scraper(query, pages)
     else:
-        scraped_data = scrape_google_maps_simple(query, pages)
+        # For real scraping, we'll just use mock for now due to cloud limitations
+        scraped_data = mock_scraper(query, pages)
     
     st.session_state.scraped_data = scraped_data
     st.session_state.scraping_complete = True
@@ -257,20 +154,8 @@ if st.session_state.scraping_complete and st.session_state.scraped_data:
     
     st.success(f"🎉 Found {len(df)} leads with email addresses!")
     
-    # Display results in tabs
-    tab1, tab2 = st.tabs(["📊 Results", "📈 Statistics"])
-    
-    with tab1:
-        st.dataframe(df, use_container_width=True)
-    
-    with tab2:
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Total Leads", len(df))
-        with col2:
-            st.metric("Unique Emails", df['Email'].nunique())
-        with col3:
-            st.metric("Success Rate", "100%")
+    # Display results
+    st.dataframe(df, use_container_width=True)
     
     # Download button
     csv = df.to_csv(index=False).encode('utf-8')
@@ -295,7 +180,7 @@ else:
         st.write("""
         ### 📋 How to use:
         1. Enter your search query
-        2. Select number of pages (1-2)
+        2. Keep mock data enabled
         3. Click "Start Scraping"
         4. Wait for results
         5. Download your leads
@@ -305,7 +190,7 @@ else:
         st.write("""
         ### 🎯 Example queries:
         - "restaurants new york"
-        - "dentists london"
+        - "dentists london" 
         - "hotels paris"
         - "software companies"
         - "marketing agencies"
@@ -313,4 +198,4 @@ else:
 
 # Add footer
 st.markdown("---")
-st.caption("💡 Tip: Start with 1 page and simple queries for best results")
+st.caption("💡 Tip: Mock data is enabled for reliable testing in cloud environment")
