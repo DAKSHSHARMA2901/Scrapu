@@ -1,4 +1,3 @@
-
 import re
 import time
 import random
@@ -12,22 +11,17 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from webdriver_manager.chrome import ChromeDriverManager
-import os
+import chromedriver_autoinstaller
 
-chrome_path = "/usr/bin/chromium-browser"
-chromedriver_path = "/usr/bin/chromedriver"
-
-from selenium.webdriver.chrome.service import Service
-
-options = Options()
-options.binary_location = chrome_path
-service = Service(chromedriver_path)
-driver = webdriver.Chrome(service=service, options=options)
-
+# ------------------------------
+# Setup Selenium Chrome driver
+# ------------------------------
 def setup_driver():
+    # Install correct ChromeDriver version automatically
+    chromedriver_autoinstaller.install()
+
     options = Options()
-    options.add_argument("--headless=new")
+    options.add_argument("--headless=new")  # required for Render
     options.add_argument("--window-size=1920,1080")
     options.add_argument("--disable-blink-features=AutomationControlled")
     options.add_argument("--disable-dev-shm-usage")
@@ -36,33 +30,43 @@ def setup_driver():
     options.add_argument("--disable-extensions")
     options.add_argument("--disable-plugins")
     options.add_argument("--disable-images")
-    options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+    options.add_argument(
+        "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    )
 
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    options.add_experimental_option('useAutomationExtension', False)
-    options.add_experimental_option("prefs", {
-        "profile.default_content_setting_values.images": 2,
-        "profile.managed_default_content_settings.images": 2
-    })
+    options.add_experimental_option("useAutomationExtension", False)
+    options.add_experimental_option(
+        "prefs",
+        {
+            "profile.default_content_setting_values.images": 2,
+            "profile.managed_default_content_settings.images": 2,
+        },
+    )
 
-    options.binary_location = "/usr/bin/chromium-browser"
+    driver = webdriver.Chrome(options=options)
 
-    major_version = "114"  # Replace with your Chrome major version
-    service = Service(ChromeDriverManager(version=major_version).install())
-    driver = webdriver.Chrome(service=service, options=options)
-
-    driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-    driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
-        'source': '''
-            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-            window.chrome = {runtime: {}, loadTimes: function() { return {}; }, csi: function() { return {}; }};
-        '''
-    })
+    # Anti-detection tweaks
+    driver.execute_script(
+        "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+    )
+    driver.execute_cdp_cmd(
+        "Page.addScriptToEvaluateOnNewDocument",
+        {
+            "source": """
+                Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+                window.chrome = {runtime: {}, loadTimes: function() { return {}; }, csi: function() { return {}; }};
+            """
+        },
+    )
 
     return driver
 
 
+# ------------------------------
+# Email extractor from website
+# ------------------------------
 def extract_emails_from_website(driver, website_url):
     if not website_url or website_url == "N/A":
         return "N/A"
@@ -77,8 +81,8 @@ def extract_emails_from_website(driver, website_url):
         time.sleep(2)
         soup = BeautifulSoup(driver.page_source, "html.parser")
         found_emails.update(email_pattern.findall(soup.get_text()))
-        contact_links = ["contact", "about", "support"]
-        for link in contact_links:
+
+        for link in ["contact", "about", "support"]:
             try:
                 driver.get(urljoin(website_url, link))
                 time.sleep(1.5)
@@ -86,12 +90,15 @@ def extract_emails_from_website(driver, website_url):
                 found_emails.update(email_pattern.findall(soup.get_text()))
             except:
                 pass
-        if found_emails:
-            return list(found_emails)[0]
-        return "N/A"
+
+        return list(found_emails)[0] if found_emails else "N/A"
     except:
         return "N/A"
 
+
+# ------------------------------
+# Google Maps Scraper
+# ------------------------------
 def scrape_google_maps(query, num_pages=1):
     driver = setup_driver()
     scraped_data = []
@@ -107,7 +114,9 @@ def scrape_google_maps(query, num_pages=1):
                 EC.presence_of_element_located((By.CSS_SELECTOR, 'div[role="feed"]'))
             )
             for _ in range(5):
-                driver.execute_script("arguments[0].scrollTop = arguments[0].scrollHeight", scrollable_div)
+                driver.execute_script(
+                    "arguments[0].scrollTop = arguments[0].scrollHeight", scrollable_div
+                )
                 time.sleep(random.uniform(1, 2))
 
             cards = driver.find_elements(By.CSS_SELECTOR, 'a[href*="/maps/place/"]')
@@ -121,12 +130,14 @@ def scrape_google_maps(query, num_pages=1):
                     time.sleep(2)
 
                     try:
-                        name = driver.find_element(By.CSS_SELECTOR, 'h1.DUwDvf').text.strip()
+                        name = driver.find_element(By.CSS_SELECTOR, "h1.DUwDvf").text.strip()
                     except:
                         name = "N/A"
 
                     try:
-                        address = driver.find_element(By.CSS_SELECTOR, 'button[aria-label*="Address"]').text.strip()
+                        address = driver.find_element(
+                            By.CSS_SELECTOR, 'button[aria-label*="Address"]'
+                        ).text.strip()
                     except:
                         address = "N/A"
 
@@ -137,22 +148,30 @@ def scrape_google_maps(query, num_pages=1):
                     seen_businesses.add((name, address))
 
                     try:
-                        phone = driver.find_element(By.CSS_SELECTOR, 'button[aria-label*="Phone"]').text.strip()
+                        phone = driver.find_element(
+                            By.CSS_SELECTOR, 'button[aria-label*="Phone"]'
+                        ).text.strip()
                     except:
                         phone = "N/A"
 
                     try:
-                        website = driver.find_element(By.CSS_SELECTOR, 'a[data-tooltip="Open website"]').get_attribute("href")
+                        website = driver.find_element(
+                            By.CSS_SELECTOR, 'a[data-tooltip="Open website"]'
+                        ).get_attribute("href")
                     except:
                         website = "N/A"
 
                     try:
-                        rating = driver.find_element(By.CSS_SELECTOR, 'span[aria-label*="star rating"]').text.strip()
+                        rating = driver.find_element(
+                            By.CSS_SELECTOR, 'span[aria-label*="star rating"]'
+                        ).text.strip()
                     except:
                         rating = "N/A"
 
                     try:
-                        email = driver.find_element(By.CSS_SELECTOR, 'a[href^="mailto:"]').get_attribute("href").replace("mailto:", "")
+                        email = driver.find_element(
+                            By.CSS_SELECTOR, 'a[href^="mailto:"]'
+                        ).get_attribute("href").replace("mailto:", "")
                     except:
                         email = "N/A"
 
@@ -160,14 +179,16 @@ def scrape_google_maps(query, num_pages=1):
                         email = extract_emails_from_website(driver, website)
 
                     if email != "N/A":
-                        scraped_data.append({
-                            "Name": name,
-                            "Address": address,
-                            "Phone": phone,
-                            "Website": website,
-                            "Email": email,
-                            "Rating": rating
-                        })
+                        scraped_data.append(
+                            {
+                                "Name": name,
+                                "Address": address,
+                                "Phone": phone,
+                                "Website": website,
+                                "Email": email,
+                                "Rating": rating,
+                            }
+                        )
 
                     driver.close()
                     driver.switch_to.window(driver.window_handles[0])
@@ -184,6 +205,10 @@ def scrape_google_maps(query, num_pages=1):
         driver.quit()
         return scraped_data
 
+
+# ------------------------------
+# Streamlit UI
+# ------------------------------
 st.title("Google Maps Lead Scraper")
 st.write("Enter a search query and number of pages to scrape. Only results with emails are collected.")
 
@@ -205,10 +230,7 @@ if start_btn:
             label="Download CSV",
             data=csv,
             file_name="scraped_leads.csv",
-            mime="text/csv"
+            mime="text/csv",
         )
     else:
         st.warning("No results found with emails.")
-
-
-
