@@ -1,9 +1,5 @@
-streamlit
-selenium
-beautifulsoup4
-pandas
-lxml
-webdriver-manager
-chromedriver-autoinstaller
-requests
-aiosqlite
+streamlit==1.28.1
+selenium==4.15.2
+beautifulsoup4==4.12.2
+pandas==2.1.3
+lxml==4.9.3
