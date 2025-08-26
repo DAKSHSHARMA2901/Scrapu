@@ -21,6 +21,15 @@ RUN apt-get update && apt-get install -y \
     curl \
     unzip \
     build-essential \
+    libglib2.0-0 \
+    libgconf-2-4 \
+    libxrandr2 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libxdamage1 \
+    libxcomposite1 \
+    libx11-xcb1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Set environment for Chromium
@@ -35,6 +44,7 @@ RUN pip install --upgrade pip setuptools wheel \
 # Copy project files
 COPY . .
 
+# Expose Streamlit port
 EXPOSE 8501
 
 # Disable Streamlit email capture
