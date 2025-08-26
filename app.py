@@ -11,9 +11,31 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import chromedriver_autoinstaller
+import logging
+import threading
+from flask import Flask, Response
+import time
+
+# Setup basic logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Create Flask app for health checks
+flask_app = Flask(__name__)
+
+@flask_app.route('/health')
+def health():
+    return 'OK', 200
+
+def run_flask_app():
+    flask_app.run(host='0.0.0.0', port=8080)
+
+# Start Flask in a separate thread for health checks
+flask_thread = threading.Thread(target=run_flask_app, daemon=True)
+flask_thread.start()
 
 # ------------------------------
-# Setup Selenium Chrome driver
+# Setup Selenium Chrome driver for Render
 # ------------------------------
 def setup_driver():
     # Install correct ChromeDriver version automatically
@@ -33,6 +55,9 @@ def setup_driver():
         "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     )
+
+    # Set Chrome binary for Render
+    options.binary_location = "/usr/bin/chromium-browser"
 
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option("useAutomationExtension", False)
@@ -98,35 +123,47 @@ def extract_emails_from_website(driver, website_url):
 # ------------------------------
 # Google Maps Scraper
 # ------------------------------
-def scrape_google_maps(query, num_pages=1):
+def scrape_google_maps(query, num_pages=1, progress_callback=None):
     driver = setup_driver()
     scraped_data = []
     seen_businesses = set()
 
     try:
         search_url = f"https://www.google.com/maps/search/{quote(query)}"
+        if progress_callback:
+            progress_callback(f"🔎 Searching: {query}")
+        
         driver.get(search_url)
-        time.sleep(3)
+        time.sleep(5)
 
         for page in range(num_pages):
-            scrollable_div = WebDriverWait(driver, 10).until(
+            if progress_callback:
+                progress_callback(f"📄 Page {page + 1}/{num_pages}")
+            
+            scrollable_div = WebDriverWait(driver, 15).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, 'div[role="feed"]'))
             )
-            for _ in range(5):
+            
+            for i in range(3):
                 driver.execute_script(
                     "arguments[0].scrollTop = arguments[0].scrollHeight", scrollable_div
                 )
+                if progress_callback:
+                    progress_callback(f"⬇️ Scrolling page {page + 1} ({i + 1}/3)")
                 time.sleep(random.uniform(1, 2))
 
             cards = driver.find_elements(By.CSS_SELECTOR, 'a[href*="/maps/place/"]')
             cards = list({card.get_attribute("href"): card for card in cards}.values())
+            
+            if progress_callback:
+                progress_callback(f"📊 Found {len(cards)} businesses on page {page + 1}")
 
-            for card in cards:
+            for i, card in enumerate(cards):
                 try:
                     href = card.get_attribute("href")
                     driver.execute_script("window.open(arguments[0]);", href)
                     driver.switch_to.window(driver.window_handles[-1])
-                    time.sleep(2)
+                    time.sleep(3)
 
                     try:
                         name = driver.find_element(By.CSS_SELECTOR, "h1.DUwDvf").text.strip()
@@ -178,58 +215,148 @@ def scrape_google_maps(query, num_pages=1):
                         email = extract_emails_from_website(driver, website)
 
                     if email != "N/A":
-                        scraped_data.append(
-                            {
-                                "Name": name,
-                                "Address": address,
-                                "Phone": phone,
-                                "Website": website,
-                                "Email": email,
-                                "Rating": rating,
-                            }
-                        )
+                        scraped_data.append({
+                            "Name": name,
+                            "Address": address,
+                            "Phone": phone,
+                            "Website": website,
+                            "Email": email,
+                            "Rating": rating,
+                        })
+                        if progress_callback:
+                            progress_callback(f"✅ Found email for: {name}")
 
                     driver.close()
                     driver.switch_to.window(driver.window_handles[0])
+                    time.sleep(1)
 
-                except:
-                    driver.close()
-                    driver.switch_to.window(driver.window_handles[0])
+                except Exception as e:
+                    try:
+                        driver.close()
+                        driver.switch_to.window(driver.window_handles[0])
+                    except:
+                        pass
                     continue
 
         driver.quit()
         return scraped_data
 
-    except:
-        driver.quit()
+    except Exception as e:
+        try:
+            driver.quit()
+        except:
+            pass
+        if progress_callback:
+            progress_callback(f"❌ Error: {str(e)}")
         return scraped_data
 
 
 # ------------------------------
 # Streamlit UI
 # ------------------------------
-st.title("Google Maps Lead Scraper")
+st.set_page_config(
+    page_title="Google Maps Lead Scraper",
+    page_icon="🔍",
+    layout="wide"
+)
+
+st.title("🔍 Google Maps Lead Scraper")
 st.write("Enter a search query and number of pages to scrape. Only results with emails are collected.")
 
-query = st.text_input("Search query", "IT services in Delhi", key="query")
-pages = st.number_input("Pages to scrape", min_value=1, max_value=5, value=1, key="pages")
-start_btn = st.button("Start Scraping", key="start_btn")
+# Sidebar for settings
+with st.sidebar:
+    st.header("Settings")
+    query = st.text_input("Search query", "IT services in Delhi", key="query")
+    pages = st.number_input("Pages to scrape", min_value=1, max_value=3, value=1, key="pages")
+    start_btn = st.button("🚀 Start Scraping", key="start_btn", type="primary")
+    
+    st.info("""
+    **Note:** 
+    - Scraping may take 2-5 minutes per page
+    - Only businesses with emails are collected
+    - Results are downloaded as CSV
+    """)
 
+# Main content
 if start_btn:
-    with st.spinner("Scraping in progress..."):
-        data = scrape_google_maps(query, pages)
-
-    if data:
-        df = pd.DataFrame(data)
-        st.success(f"Scraping complete! {len(df)} results found.")
-        st.dataframe(df)
-
-        csv = df.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            label="Download CSV",
-            data=csv,
-            file_name="scraped_leads.csv",
-            mime="text/csv",
-        )
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    results_placeholder = st.empty()
+    
+    def update_progress(message, progress=None):
+        status_text.text(message)
+        if progress is not None:
+            progress_bar.progress(progress)
+    
+    update_progress("🔄 Initializing scraper...", 10)
+    
+    # Run scraping in a thread to avoid blocking
+    import threading
+    
+    scraped_data = []
+    error_message = None
+    
+    def scraping_thread():
+        nonlocal scraped_data, error_message
+        try:
+            scraped_data = scrape_google_maps(
+                query, 
+                pages, 
+                progress_callback=update_progress
+            )
+        except Exception as e:
+            error_message = str(e)
+    
+    thread = threading.Thread(target=scraping_thread)
+    thread.start()
+    
+    # Wait for thread to complete with timeout
+    thread.join(timeout=300)  # 5 minute timeout
+    
+    if thread.is_alive():
+        update_progress("⏰ Scraping timed out after 5 minutes", 100)
+        st.error("Scraping took too long. Please try with fewer pages or a simpler query.")
     else:
-        st.warning("No results found with emails.")
+        if error_message:
+            update_progress(f"❌ Error: {error_message}", 100)
+            st.error(f"Scraping failed: {error_message}")
+        elif scraped_data:
+            update_progress(f"✅ Scraping complete! Found {len(scraped_data)} leads with emails.", 100)
+            
+            df = pd.DataFrame(scraped_data)
+            st.success(f"🎉 Successfully scraped {len(df)} leads!")
+            
+            # Display results
+            st.dataframe(df, use_container_width=True)
+            
+            # Download button
+            csv = df.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                label="📥 Download CSV",
+                data=csv,
+                file_name=f"leads_{query.replace(' ', '_')}.csv",
+                mime="text/csv",
+            )
+        else:
+            update_progress("❌ No results found with emails.", 100)
+            st.warning("No businesses with email addresses were found. Try a different search query.")
+
+else:
+    st.info("👆 Click 'Start Scraping' to begin")
+    st.write("""
+    ### How it works:
+    1. Enter your search query (e.g., "restaurants in new york")
+    2. Select how many pages to scrape (1-3 recommended)
+    3. Click "Start Scraping" and wait for results
+    4. Download your leads as CSV
+    
+    ### Features:
+    - Extracts business name, address, phone, website, email, and rating
+    - Automatically visits websites to find email addresses
+    - Filters out duplicates
+    - Export results to CSV
+    """)
+
+# Add health status
+st.sidebar.markdown("---")
+st.sidebar.caption("🟢 System status: Online")
