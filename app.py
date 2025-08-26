@@ -4,12 +4,12 @@ import random
 import pandas as pd
 import streamlit as st
 from urllib.parse import quote
-from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
 import logging
 
 # Setup basic logging
@@ -63,9 +63,9 @@ def extract_emails_from_text(text):
     return emails[0] if emails else "N/A"
 
 # ------------------------------
-# Simple Google Maps Scraper
+# Real Google Maps Scraper
 # ------------------------------
-def scrape_google_maps_simple(query, progress_callback=None):
+def scrape_google_maps_real(query, progress_callback=None):
     driver = setup_driver()
     if not driver:
         if progress_callback:
@@ -83,30 +83,33 @@ def scrape_google_maps_simple(query, progress_callback=None):
         time.sleep(5)
 
         # Wait for results
-        WebDriverWait(driver, 15).until(
+        WebDriverWait(driver, 20).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, 'div[role="feed"]'))
         )
         
+        if progress_callback:
+            progress_callback("📊 Loading business listings...")
+        
         # Scroll to load more results
         scrollable_div = driver.find_element(By.CSS_SELECTOR, 'div[role="feed"]')
-        for i in range(2):
+        for i in range(3):
             driver.execute_script("arguments[0].scrollTop = arguments[0].scrollHeight", scrollable_div)
             time.sleep(2)
             if progress_callback:
-                progress_callback(f"⬇️ Scrolling ({i + 1}/2)")
+                progress_callback(f"⬇️ Scrolling to load more ({i + 1}/3)")
         
         # Get business listings
-        listings = driver.find_elements(By.CSS_SELECTOR, 'div[role="article"]')[:10]  # Limit to 10
+        listings = driver.find_elements(By.CSS_SELECTOR, 'div[role="article"]')
         
         if progress_callback:
-            progress_callback(f"📊 Found {len(listings)} businesses")
+            progress_callback(f"✅ Found {len(listings)} businesses")
         
-        for i, listing in enumerate(listings):
+        for i, listing in enumerate(listings[:15]):  # Limit to 15 for stability
             try:
                 listing.click()
-                time.sleep(2)
+                time.sleep(3)
                 
-                # Extract basic info from the details panel
+                # Extract information from the details panel
                 business_data = {}
                 
                 # Name
@@ -132,27 +135,34 @@ def scrape_google_maps_simple(query, progress_callback=None):
                 
                 # Website
                 try:
-                    website_link = driver.find_element(By.XPATH, '//a[contains(@href, "://") and not(contains(@href, "google"))]')
-                    business_data["Website"] = website_link.get_attribute("href")
+                    website_links = driver.find_elements(By.XPATH, '//a[contains(@href, "://") and not(contains(@href, "google"))]')
+                    business_data["Website"] = website_links[0].get_attribute("href") if website_links else "N/A"
                 except:
                     business_data["Website"] = "N/A"
                 
-                # Try to extract email from page source
+                # Rating
+                try:
+                    rating_span = driver.find_element(By.XPATH, '//span[contains(@aria-label, "stars") or contains(@aria-label, "star")]')
+                    business_data["Rating"] = rating_span.get_attribute("aria-label")
+                except:
+                    business_data["Rating"] = "N/A"
+                
+                # Extract email from page source
                 page_source = driver.page_source
                 business_data["Email"] = extract_emails_from_text(page_source)
                 
-                # Only add if we have a name
+                # Only add if we have a valid name
                 if business_data["Name"] != "N/A" and business_data["Name"].strip():
                     scraped_data.append(business_data)
                     if progress_callback:
-                        progress_callback(f"✅ {business_data['Name'][:20]}...")
+                        progress_callback(f"📝 Added: {business_data['Name'][:25]}...")
                 
             except Exception as e:
                 continue
                 
     except Exception as e:
         if progress_callback:
-            progress_callback(f"❌ Error: {str(e)}")
+            progress_callback(f"❌ Error during scraping")
     finally:
         try:
             driver.quit()
@@ -165,13 +175,13 @@ def scrape_google_maps_simple(query, progress_callback=None):
 # Streamlit UI
 # ------------------------------
 st.set_page_config(
-    page_title="Google Maps Lead Scraper",
+    page_title="Google Maps Lead Scraper - REAL DATA",
     page_icon="🔍",
     layout="wide"
 )
 
-st.title("🔍 Google Maps Lead Scraper")
-st.write("Find real business leads with contact information")
+st.title("🔍 Google Maps Lead Scraper - REAL DATA")
+st.write("Get real business leads with contact information from Google Maps")
 
 # Initialize session state
 if 'scraping_complete' not in st.session_state:
@@ -184,13 +194,14 @@ with st.sidebar:
     st.header("⚙️ Settings")
     query = st.text_input("Search query", "restaurants in mumbai", key="query")
     
-    start_btn = st.button("🚀 Start Scraping", key="start_btn", type="primary", use_container_width=True)
+    start_btn = st.button("🚀 Start Real Scraping", key="start_btn", type="primary", use_container_width=True)
     
-    st.info("""
-    **Note:** 
-    - Scraping takes 2-3 minutes
-    - Results include real business data
+    st.warning("""
+    **Important:** 
+    - Real scraping takes 3-5 minutes
+    - Results include actual business data
     - Be patient during the process
+    - First run may take longer
     """)
 
 # Main content
@@ -206,8 +217,8 @@ if start_btn:
         if progress is not None:
             progress_bar.progress(progress)
     
-    # Start scraping
-    scraped_data = scrape_google_maps_simple(
+    # Start real scraping
+    scraped_data = scrape_google_maps_real(
         query, 
         progress_callback=update_progress
     )
@@ -222,45 +233,59 @@ if st.session_state.scraping_complete:
     if st.session_state.scraped_data:
         df = pd.DataFrame(st.session_state.scraped_data)
         
-        st.success(f"🎉 Found {len(df)} businesses!")
+        st.success(f"🎉 Successfully scraped {len(df)} real businesses!")
         
         # Display results
-        st.dataframe(df, use_container_width=True)
+        st.dataframe(df, use_container_width=True, height=400)
+        
+        # Show statistics
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Total Leads", len(df))
+        with col2:
+            emails_found = sum(1 for x in df['Email'] if x != "N/A")
+            st.metric("Emails Found", emails_found)
+        with col3:
+            websites_found = sum(1 for x in df['Website'] if x != "N/A")
+            st.metric("Websites Found", websites_found)
         
         # Download button
         csv = df.to_csv(index=False).encode('utf-8')
         st.download_button(
             label="📥 Download CSV",
             data=csv,
-            file_name=f"business_leads_{query.replace(' ', '_')}.csv",
+            file_name=f"real_business_leads_{query.replace(' ', '_')}.csv",
             mime="text/csv",
             use_container_width=True
         )
     else:
-        st.warning("❌ No businesses found. Try a different search query.")
+        st.warning("❌ No businesses found. Try a different search query or location.")
 
 else:
-    st.info("👆 Enter a search query and click 'Start Scraping'")
+    # Show instructions when not scraping
+    st.info("👆 Enter a search query and click 'Start Real Scraping'")
     
     col1, col2 = st.columns(2)
     
     with col1:
         st.write("""
         ### 📋 How to use:
-        1. Enter search query
+        1. Enter your search query
         2. Click Start Scraping
-        3. Wait 2-3 minutes
-        4. Download results
+        3. Wait 3-5 minutes
+        4. Download real leads
         """)
     
     with col2:
         st.write("""
-        ### 🎯 Try these:
+        ### 🎯 Try these examples:
         - "restaurants mumbai"
-        - "hotels delhi"
+        - "hotels in delhi"
         - "cafe bangalore"
         - "it companies"
+        - "dentists near me"
         """)
 
+# Add footer
 st.markdown("---")
-st.caption("Google Maps Lead Scraper - Real Business Data")
+st.caption("Google Maps Lead Scraper - Extracting real business data")
