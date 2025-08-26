@@ -41,21 +41,21 @@ RUN mkdir -p /etc/apt/keyrings \
     xdg-utils \
     && rm -rf /var/lib/apt/lists/*
 
-# Install ChromeDriver that matches Chrome version using Chrome for Testing
-RUN CHROME_VERSION=$(google-chrome --version | grep -oP 'Google Chrome \K\d+') \
-    && echo "Detected Chrome major version: $CHROME_VERSION" \
-    # Get the latest version for this major release
-    && LATEST_VERSION=$(curl -s "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions.json" | jq -r ".channels.Stable.version") \
-    && echo "Latest stable version: $LATEST_VERSION" \
-    # Download ChromeDriver
+# Install ChromeDriver that matches Chrome version
+RUN CHROME_VERSION=$(google-chrome --version | grep -oP 'Google Chrome \K\d+\.\d+\.\d+\.\d+') \
+    && echo "Detected Chrome version: $CHROME_VERSION" \
+    && MAJOR_VERSION=$(echo $CHROME_VERSION | cut -d. -f1) \
+    && echo "Major version: $MAJOR_VERSION" \
+    # Try to get the exact version from Chrome for Testing
     && wget -q --continue -O /tmp/chromedriver-linux64.zip \
-       "https://edgedl.me.gvt1.com/edgedl/chrome/chrome-for-testing/${LATEST_VERSION}/linux64/chromedriver-linux64.zip" \
+       "https://storage.googleapis.com/chrome-for-testing-public/$CHROME_VERSION/linux64/chromedriver-linux64.zip" \
+    # If exact version fails, try major version
     || wget -q --continue -O /tmp/chromedriver-linux64.zip \
-       "https://storage.googleapis.com/chrome-for-testing-public/${LATEST_VERSION}/linux64/chromedriver-linux64.zip" \
-    # Fallback to manual version if needed
-    || (echo "Falling back to manual version detection" \
+       "https://storage.googleapis.com/chrome-for-testing-public/${MAJOR_VERSION}.0.0.0/linux64/chromedriver-linux64.zip" \
+    # If that fails, use a known working version for Chrome 139
+    || (echo "Using fallback version for Chrome 139" \
         && wget -q --continue -O /tmp/chromedriver-linux64.zip \
-           "https://storage.googleapis.com/chrome-for-testing-public/120.0.6099.109/linux64/chromedriver-linux64.zip") \
+           "https://storage.googleapis.com/chrome-for-testing-public/139.0.7258.154/linux64/chromedriver-linux64.zip") \
     && unzip /tmp/chromedriver-linux64.zip -d /tmp/ \
     && mv /tmp/chromedriver-linux64/chromedriver /usr/local/bin/ \
     && chmod +x /usr/local/bin/chromedriver \
