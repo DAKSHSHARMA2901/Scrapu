@@ -34,16 +34,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     || { echo "apt-get install failed"; cat /var/log/apt/term.log; exit 1; }
 
-# Verify Chromium installation
-RUN chromium --version || { echo "Chromium not found"; exit 1; }
+# Verify Chromium installation and get version
+RUN chromium --version || { echo "Chromium not found"; exit 1; } && CHROMIUM_VERSION=$(chromium --version | grep -oP 'Chromium \K\d+\.\d+\.\d+\.\d+' || echo "120.0.6099.129") && echo "Detected Chromium version: $CHROMIUM_VERSION"
 
-# Install specific ChromeDriver version
+# Install specific ChromeDriver version with fallback
 ENV CHROMEDRIVER_VERSION="120.0.6099.129"
-RUN wget -q --continue -P /usr/bin "https://chromedriver.storage.googleapis.com/${CHROMEDRIVER_VERSION}/chromedriver-linux64.zip" \
-    && unzip /usr/bin/chromedriver-linux64.zip -d /usr/bin/ \
-    && rm /usr/bin/chromedriver-linux64.zip \
+RUN echo "Attempting to download ChromeDriver version: ${CHROMEDRIVER_VERSION}" \
+    && wget -q --continue -P /tmp "https://chromedriver.storage.googleapis.com/${CHROMEDRIVER_VERSION}/chromedriver-linux64.zip" \
+    && if [ $? -ne 0 ]; then \
+        echo "Primary download failed, falling back to version 119.0.6045.105"; \
+        CHROMEDRIVER_VERSION="119.0.6045.105" \
+        && wget -q --continue -P /tmp "https://chromedriver.storage.googleapis.com/${CHROMEDRIVER_VERSION}/chromedriver-linux64.zip" \
+        || { echo "Fallback download failed"; exit 1; }; \
+    fi \
+    && unzip /tmp/chromedriver-linux64.zip -d /usr/bin/ \
+    && rm /tmp/chromedriver-linux64.zip \
     && chmod +x /usr/bin/chromedriver \
-    || { echo "ChromeDriver download or setup failed"; exit 1; }
+    || { echo "ChromeDriver unzip or setup failed"; exit 1; }
 
 # Env vars for Selenium
 ENV CHROME_BIN=/usr/bin/chromium
