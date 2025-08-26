@@ -8,20 +8,28 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-# Install system dependencies (for lxml, pandas, etc.)
+# Install system dependencies (for Selenium + lxml + pandas + Chromium)
 RUN apt-get update && apt-get install -y \
     build-essential \
     curl \
+    wget \
+    unzip \
     libxml2-dev \
     libxslt1-dev \
     python3-dev \
+    chromium \
+    fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
+
+# Set environment variable for Chromium path
+ENV CHROME_BIN=/usr/bin/chromium
 
 # Copy dependency files first (for caching)
 COPY requirements.txt .
 
 # Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --upgrade pip setuptools wheel \
+    && pip install --no-cache-dir -r requirements.txt
 
 # Copy project files
 COPY . .
