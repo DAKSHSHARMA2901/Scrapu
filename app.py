@@ -11,12 +11,18 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import chromedriver_autoinstaller
+import logging
+
+# Set up logging to display in Streamlit
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 # ------------------------------
 # Setup Selenium Chrome driver
 # ------------------------------
-def setup_driver():
+def setup_driver(timeout=60):  # Added timeout parameter
     chromedriver_autoinstaller.install()
+    logger.info("Installing ChromeDriver...")
 
     options = Options()
     options.add_argument("--headless=new")  # Required for Render
@@ -44,6 +50,7 @@ def setup_driver():
     )
 
     driver = webdriver.Chrome(options=options)
+    logger.info("ChromeDriver initialized.")
 
     # Anti-detection tweaks
     driver.execute_script(
@@ -59,6 +66,7 @@ def setup_driver():
         },
     )
 
+    driver.set_page_load_timeout(timeout)
     return driver
 
 # ------------------------------
@@ -85,21 +93,19 @@ def extract_emails_from_website(driver, website_url):
                 time.sleep(1.5)
                 soup = BeautifulSoup(driver.page_source, "html.parser")
                 found_emails.update(email_pattern.findall(soup.get_text()))
-            except:
-                pass
+            except Exception as e:
+                logger.error(f"Error navigating to {link}: {str(e)}")
+                continue
 
         return list(found_emails)[0] if found_emails else "N/A"
-    except:
+    except Exception as e:
+        logger.error(f"Error extracting emails from {website_url}: {str(e)}")
         return "N/A"
 
 # ------------------------------
 # Google Maps Scraper
 # ------------------------------
 def scrape_google_maps(query, num_pages=1):
-    import logging
-    logging.basicConfig(level=logging.INFO)
-    logger = logging.getLogger(__name__)
-    
     logger.info(f"Starting scraping for query: {query} over {num_pages} pages.")
     driver = setup_driver()
     scraped_data = []
@@ -107,103 +113,124 @@ def scrape_google_maps(query, num_pages=1):
 
     try:
         search_url = f"https://www.google.com/maps/search/{quote(query)}"
+        logger.info(f"Navigating to: {search_url}")
         driver.get(search_url)
         time.sleep(3)
 
         for page in range(num_pages):
-            scrollable_div = WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, 'div[role="feed"]'))
-            )
-            for _ in range(5):
-                driver.execute_script(
-                    "arguments[0].scrollTop = arguments[0].scrollHeight", scrollable_div
+            try:
+                scrollable_div = WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, 'div[role="feed"]'))
                 )
-                time.sleep(random.uniform(1, 2))
+                logger.info(f"Found scrollable div on page {page + 1}")
+                last_height = driver.execute_script("return arguments[0].scrollHeight", scrollable_div)
+                for _ in range(5):
+                    driver.execute_script(
+                        "arguments[0].scrollTop = arguments[0].scrollHeight", scrollable_div
+                    )
+                    time.sleep(random.uniform(1, 2))
+                    new_height = driver.execute_script("return arguments[0].scrollHeight", scrollable_div)
+                    if new_height == last_height:
+                        break
+                    last_height = new_height
+                logger.info(f"Finished scrolling on page {page + 1}")
 
-            cards = driver.find_elements(By.CSS_SELECTOR, 'a[href*="/maps/place/"]')
-            cards = list({card.get_attribute("href"): card for card in cards}.values())
+                cards = driver.find_elements(By.CSS_SELECTOR, 'a[href*="/maps/place/"]')
+                cards = list({card.get_attribute("href"): card for card in cards}.values())
+                logger.info(f"Found {len(cards)} cards on page {page + 1}")
 
-            for card in cards:
-                try:
-                    href = card.get_attribute("href")
-                    driver.execute_script("window.open(arguments[0]);", href)
-                    driver.switch_to.window(driver.window_handles[-1])
-                    time.sleep(2)
-
+                for i, card in enumerate(cards):
                     try:
-                        name = driver.find_element(By.CSS_SELECTOR, "h1.DUwDvf").text.strip()
-                    except:
-                        name = "N/A"
+                        href = card.get_attribute("href")
+                        logger.info(f"Opening business link {i + 1}: {href}")
+                        driver.execute_script("window.open(arguments[0]);", href)
+                        driver.switch_to.window(driver.window_handles[-1])
+                        time.sleep(2)
 
-                    try:
-                        address = driver.find_element(
-                            By.CSS_SELECTOR, 'button[aria-label*="Address"]'
-                        ).text.strip()
-                    except:
-                        address = "N/A"
+                        try:
+                            name = driver.find_element(By.CSS_SELECTOR, "h1.DUwDvf").text.strip()
+                        except Exception as e:
+                            name = "N/A"
+                            logger.error(f"Error getting name: {str(e)}")
 
-                    if (name, address) in seen_businesses:
+                        try:
+                            address = driver.find_element(
+                                By.CSS_SELECTOR, 'button[aria-label*="Address"]'
+                            ).text.strip()
+                        except Exception as e:
+                            address = "N/A"
+                            logger.error(f"Error getting address: {str(e)}")
+
+                        if (name, address) in seen_businesses:
+                            driver.close()
+                            driver.switch_to.window(driver.window_handles[0])
+                            continue
+                        seen_businesses.add((name, address))
+
+                        try:
+                            phone = driver.find_element(
+                                By.CSS_SELECTOR, 'button[aria-label*="Phone"]'
+                            ).text.strip()
+                        except Exception as e:
+                            phone = "N/A"
+                            logger.error(f"Error getting phone: {str(e)}")
+
+                        try:
+                            website = driver.find_element(
+                                By.CSS_SELECTOR, 'a[data-tooltip="Open website"]'
+                            ).get_attribute("href")
+                        except Exception as e:
+                            website = "N/A"
+                            logger.error(f"Error getting website: {str(e)}")
+
+                        try:
+                            rating = driver.find_element(
+                                By.CSS_SELECTOR, 'span[aria-label*="star rating"]'
+                            ).text.strip()
+                        except Exception as e:
+                            rating = "N/A"
+                            logger.error(f"Error getting rating: {str(e)}")
+
+                        try:
+                            email = driver.find_element(
+                                By.CSS_SELECTOR, 'a[href^="mailto:"]'
+                            ).get_attribute("href").replace("mailto:", "")
+                        except Exception as e:
+                            email = "N/A"
+                            logger.error(f"Error getting email: {str(e)}")
+
+                        if email == "N/A" and website != "N/A":
+                            email = extract_emails_from_website(driver, website)
+
+                        # Filter for both email and phone
+                        if email != "N/A" and phone != "N/A":
+                            scraped_data.append(
+                                {
+                                    "Name": name,
+                                    "Address": address,
+                                    "Phone": phone,
+                                    "Website": website,
+                                    "Email": email,
+                                    "Rating": rating,
+                                }
+                            )
+                            logger.info(f"✅ Found: {name} (Email: {email}, Phone: {phone})")
+
+                        driver.close()
+                        driver.switch_to.window(driver.window_handles[0])
+
+                    except Exception as e:
+                        logger.error(f"⚠️ Error processing card {i + 1}: {str(e)}")
                         driver.close()
                         driver.switch_to.window(driver.window_handles[0])
                         continue
-                    seen_businesses.add((name, address))
 
-                    try:
-                        phone = driver.find_element(
-                            By.CSS_SELECTOR, 'button[aria-label*="Phone"]'
-                        ).text.strip()
-                    except:
-                        phone = "N/A"
-
-                    try:
-                        website = driver.find_element(
-                            By.CSS_SELECTOR, 'a[data-tooltip="Open website"]'
-                        ).get_attribute("href")
-                    except:
-                        website = "N/A"
-
-                    try:
-                        rating = driver.find_element(
-                            By.CSS_SELECTOR, 'span[aria-label*="star rating"]'
-                        ).text.strip()
-                    except:
-                        rating = "N/A"
-
-                    try:
-                        email = driver.find_element(
-                            By.CSS_SELECTOR, 'a[href^="mailto:"]'
-                        ).get_attribute("href").replace("mailto:", "")
-                    except:
-                        email = "N/A"
-
-                    if email == "N/A" and website != "N/A":
-                        email = extract_emails_from_website(driver, website)
-
-                    # Filter for both email and phone
-                    if email != "N/A" and phone != "N/A":
-                        scraped_data.append(
-                            {
-                                "Name": name,
-                                "Address": address,
-                                "Phone": phone,
-                                "Website": website,
-                                "Email": email,
-                                "Rating": rating,
-                            }
-                        )
-                        logger.info(f"✅ Found: {name} (Email: {email}, Phone: {phone})")
-
-                    driver.close()
-                    driver.switch_to.window(driver.window_handles[0])
-
-                except Exception as e:
-                    logger.error(f"⚠️ Error scraping card: {str(e)}")
-                    driver.close()
-                    driver.switch_to.window(driver.window_handles[0])
-                    continue
+            except Exception as e:
+                logger.error(f"Error processing page {page + 1}: {str(e)}")
+                continue
 
         driver.quit()
-        logger.info(f"Scrape completed.")
+        logger.info(f"Scrape completed with {len(scraped_data)} results.")
         return scraped_data
 
     except Exception as e:
@@ -224,6 +251,12 @@ start_btn = st.button("Start Scraping")
 if start_btn:
     with st.spinner("Scraping in progress..."):
         data = scrape_google_maps(query, pages)
+        # Display logs in Streamlit for debugging
+        st.write("### Debug Logs")
+        for handler in logger.handlers:
+            if isinstance(handler, logging.StreamHandler):
+                for record in handler.stream.getvalue().splitlines() if hasattr(handler.stream, 'getvalue') else []:
+                    st.write(record)
 
     if data:
         df = pd.DataFrame(data)
