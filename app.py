@@ -137,11 +137,11 @@ def scrape_google_maps(query, num_pages=1, logger=print):
         search_url = f"https://www.google.com/maps/search/{quote(query)}"
         logger(f"🔎 Opening: {search_url}")
         driver.get(search_url)
-        time.sleep(10)  # Increased for JS load
+        time.sleep(15)  # Increased for JS load
 
         for page in range(num_pages):
             logger(f"📄 Scraping page {page+1}...")
-            scrollable_div = WebDriverWait(driver, 15).until(
+            scrollable_div = WebDriverWait(driver, 20).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, 'div[role="feed"]'))
             )
 
@@ -154,7 +154,7 @@ def scrape_google_maps(query, num_pages=1, logger=print):
                     break
                 last_height = new_height
 
-            cards = WebDriverWait(driver, 10).until(
+            cards = WebDriverWait(driver, 20).until(
                 EC.presence_of_all_elements_located((By.CSS_SELECTOR, 'a[href*="/maps/place/"]'))
             )
             cards = list({card.get_attribute("href"): card for card in cards}.values())
