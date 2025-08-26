@@ -248,7 +248,7 @@ async def main():
     await db.initialize()
 
     st.title("Google Maps Lead Scraper")
-    st.write("Enter a search query. Scrape limited to 1 page and 1 minute.")
+    st.write("Enter a search query. Scrape limited to 1 page and 1 minute. Only businesses with email and phone are shown.")
     
     query = st.text_input("Search query", "IT services in Delhi", key="query")
     start_btn = st.button("Start Scraping", key="start_btn")
@@ -274,7 +274,7 @@ async def main():
         if valid_data:
             df = pd.DataFrame(valid_data)
             st.success(f"Scraping complete! {len(df)} results found with email and phone.")
-            st.table(df)  # Display as table
+            st.table(df)  # Display as table with clear column headers
 
             csv_filename = "scraped_leads.csv"
             await db.export_to_csv(session_id, csv_filename)
