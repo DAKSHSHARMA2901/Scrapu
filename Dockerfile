@@ -30,10 +30,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxshmfence1 \
     fonts-liberation \
     chromium \
-    chromium-driver \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* \
     || { echo "apt-get install failed"; cat /var/log/apt/term.log; exit 1; }
+
+# Install specific ChromeDriver version matching Chromium
+RUN CHROMIUM_VERSION=$(chromium --version | grep -oP 'Chromium \K\d+' || echo "120") \
+    && wget -q --continue -P /tmp "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_${CHROMIUM_VERSION}" \
+    && CHROMEDRIVER_VERSION=$(cat /tmp/LATEST_RELEASE_${CHROMIUM_VERSION}) \
+    && wget -q --continue -P /usr/bin "https://chromedriver.storage.googleapis.com/${CHROMEDRIVER_VERSION}/chromedriver-linux64.zip" \
+    && unzip /usr/bin/chromedriver-linux64.zip -d /usr/bin/ \
+    && rm /usr/bin/chromedriver-linux64.zip /tmp/LATEST_RELEASE_${CHROMIUM_VERSION} \
+    && chmod +x /usr/bin/chromedriver \
+    || { echo "ChromeDriver download failed"; exit 1; }
 
 # Env vars for Selenium
 ENV CHROME_BIN=/usr/bin/chromium
