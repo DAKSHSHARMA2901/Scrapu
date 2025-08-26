@@ -7,18 +7,16 @@ from urllib.parse import urljoin, quote
 from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import chromedriver_autoinstaller
-import os
-import sys
 
 # ------------------------------
 # Setup Selenium Chrome driver
 # ------------------------------
 def setup_driver():
+    # Install correct ChromeDriver version automatically
     chromedriver_autoinstaller.install()
 
     options = Options()
@@ -48,6 +46,7 @@ def setup_driver():
 
     driver = webdriver.Chrome(options=options)
 
+    # Anti-detection tweaks
     driver.execute_script(
         "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
     )
@@ -62,6 +61,7 @@ def setup_driver():
     )
 
     return driver
+
 
 # ------------------------------
 # Email extractor from website
@@ -93,6 +93,7 @@ def extract_emails_from_website(driver, website_url):
         return list(found_emails)[0] if found_emails else "N/A"
     except:
         return "N/A"
+
 
 # ------------------------------
 # Google Maps Scraper
@@ -203,13 +204,13 @@ def scrape_google_maps(query, num_pages=1):
         driver.quit()
         return scraped_data
 
+
 # ------------------------------
 # Streamlit UI
 # ------------------------------
 st.title("Google Maps Lead Scraper")
 st.write("Enter a search query and number of pages to scrape. Only results with emails are collected.")
 
-# Explicit keys to avoid session_state errors
 query = st.text_input("Search query", "IT services in Delhi", key="query")
 pages = st.number_input("Pages to scrape", min_value=1, max_value=5, value=1, key="pages")
 start_btn = st.button("Start Scraping", key="start_btn")
@@ -232,13 +233,3 @@ if start_btn:
         )
     else:
         st.warning("No results found with emails.")
-
-# ------------------------------
-# Render deployment port binding
-# ------------------------------
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8501))
-    st._is_running_with_streamlit = True  # Render requirement
-    import streamlit.web.cli as stcli
-    sys.argv = ["streamlit", "run", __file__, "--server.port", str(port), "--server.address", "0.0.0.0"]
-    sys.exit(stcli.main())
