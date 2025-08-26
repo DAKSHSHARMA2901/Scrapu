@@ -8,8 +8,6 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from webdriver_manager.chrome import ChromeDriverManager
-from selenium.webdriver.chrome.service import Service
 import logging
 
 # Setup basic logging
@@ -17,7 +15,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ------------------------------
-# Setup Chrome driver with WebDriver Manager
+# Setup Chrome driver
 # ------------------------------
 def setup_driver():
     try:
@@ -32,6 +30,9 @@ def setup_driver():
         # Use system Chrome
         options.binary_location = "/usr/bin/google-chrome-stable"
         
+        # Use system ChromeDriver
+        driver_path = "/usr/local/bin/chromedriver"
+        
         # Anti-detection settings
         options.add_argument("--disable-extensions")
         options.add_argument("--disable-plugins")
@@ -41,9 +42,7 @@ def setup_driver():
         # Set user agent
         options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
-        # Use WebDriver Manager to handle ChromeDriver automatically
-        service = Service(ChromeDriverManager().install())
-        driver = webdriver.Chrome(service=service, options=options)
+        driver = webdriver.Chrome(options=options)
 
         # Stealth mode
         driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
@@ -99,7 +98,7 @@ def scrape_google_maps_simple(query, progress_callback=None):
                 progress_callback(f"⬇️ Scrolling ({i + 1}/2)")
         
         # Get business listings
-        listings = driver.find_elements(By.CSS_SELECTOR, 'div[role="article"]')[:10]  # Limit to 10
+        listings = driver.find_elements(By.CSS_SELECTOR, 'div[role="article"]')[:8]  # Limit to 8
         
         if progress_callback:
             progress_callback(f"✅ Found {len(listings)} businesses")
