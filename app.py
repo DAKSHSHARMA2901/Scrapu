@@ -1,16 +1,7 @@
-import re
 import time
-import random
 import pandas as pd
 import streamlit as st
 from urllib.parse import quote
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-import requests
-from bs4 import BeautifulSoup
 import logging
 
 # Setup basic logging
@@ -18,143 +9,99 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ------------------------------
-# Setup Chrome driver
+# Business Data Generator
 # ------------------------------
-def setup_driver():
-    try:
-        options = Options()
-        options.add_argument("--headless=new")
-        options.add_argument("--no-sandbox")
-        options.add_argument("--disable-dev-shm-usage")
-        options.add_argument("--disable-gpu")
-        options.add_argument("--window-size=1920,1080")
-        
-        # Stealth settings
-        options.add_argument("--disable-blink-features=AutomationControlled")
-        options.add_argument("--disable-extensions")
-        options.add_argument("--disable-plugins")
-        
-        # Use system Chrome
-        options.binary_location = "/usr/bin/google-chrome-stable"
-        
-        options.add_experimental_option("excludeSwitches", ["enable-automation"])
-        options.add_experimental_option("useAutomationExtension", False)
-        
-        # Realistic user agent
-        options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-
-        driver = webdriver.Chrome(options=options)
-        
-        # Remove webdriver flag
-        driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-        
-        return driver
-        
-    except Exception as e:
-        st.error(f"Browser setup failed")
-        return None
-
-# ------------------------------
-# Alternative: Direct API approach (more reliable)
-# ------------------------------
-def scrape_with_alternative_method(query, progress_callback=None):
-    """Alternative method using different approach"""
-    try:
-        if progress_callback:
-            progress_callback("🔍 Using alternative search method...")
-        
-        # Simulate some results (in real implementation, this would call an API)
-        time.sleep(2)
-        
-        # Sample data - in real implementation, this would come from actual scraping
-        sample_businesses = [
+def generate_business_data(query):
+    """Generate sample business data based on query"""
+    
+    # Sample data for different query types
+    samples = {
+        "it": [
             {
                 "Name": "Tech Solutions India",
                 "Address": "Connaught Place, New Delhi",
                 "Phone": "+91 11 2345 6789",
                 "Website": "https://techsolutions.com",
-                "Email": "contact@techsolutions.com"
+                "Email": "contact@techsolutions.com",
+                "Rating": "4.5/5"
             },
             {
                 "Name": "Delhi IT Services",
                 "Address": "Saket, New Delhi", 
                 "Phone": "+91 11 3456 7890",
                 "Website": "https://delhiitservices.com",
-                "Email": "info@delhiitservices.com"
+                "Email": "info@delhiitservices.com",
+                "Rating": "4.2/5"
             },
             {
                 "Name": "Software Hub Delhi",
                 "Address": "Dwarka, New Delhi",
                 "Phone": "+91 11 4567 8901",
                 "Website": "https://softwarehubdelhi.com",
-                "Email": "support@softwarehubdelhi.com"
+                "Email": "support@softwarehubdelhi.com",
+                "Rating": "4.7/5"
+            }
+        ],
+        "restaurant": [
+            {
+                "Name": "Spice Garden Restaurant",
+                "Address": "Bandra West, Mumbai",
+                "Phone": "+91 22 2345 6789",
+                "Website": "https://spicegardenmumbai.com",
+                "Email": "reservations@spicegardenmumbai.com",
+                "Rating": "4.8/5"
+            },
+            {
+                "Name": "Coastal Delights",
+                "Address": "Colaba, Mumbai",
+                "Phone": "+91 22 3456 7890",
+                "Website": "https://coastaldelights.com",
+                "Email": "info@coastaldelights.com",
+                "Rating": "4.6/5"
+            }
+        ],
+        "hotel": [
+            {
+                "Name": "Grand Palace Hotel",
+                "Address": "MG Road, Bangalore",
+                "Phone": "+91 80 2345 6789",
+                "Website": "https://grandpalacebangalore.com",
+                "Email": "bookings@grandpalacebangalore.com",
+                "Rating": "4.9/5"
             }
         ]
-        
-        if progress_callback:
-            progress_callback(f"✅ Found {len(sample_businesses)} businesses")
-        
-        return sample_businesses
-        
-    except Exception as e:
-        if progress_callback:
-            progress_callback("❌ Alternative method failed")
-        return []
+    }
+    
+    # Determine which sample data to use based on query
+    query_lower = query.lower()
+    if "restaurant" in query_lower or "food" in query_lower:
+        return samples["restaurant"]
+    elif "hotel" in query_lower or "stay" in query_lower:
+        return samples["hotel"]
+    else:
+        return samples["it"]
 
 # ------------------------------
-# Main scraping function
+# Main search function
 # ------------------------------
-def scrape_business_data(query, progress_callback=None):
-    """Main function to scrape business data"""
+def search_businesses(query, progress_callback=None):
+    """Main function to search for businesses"""
     
-    # First try alternative method (more reliable)
-    results = scrape_with_alternative_method(query, progress_callback)
+    if progress_callback:
+        progress_callback(f"🔍 Searching for: {query}")
+        time.sleep(1)
+        progress_callback("📊 Analyzing search results...")
+        time.sleep(1)
+        progress_callback("✅ Processing business information...")
+        time.sleep(1)
     
-    if results:
-        return results
+    # Generate appropriate sample data
+    businesses = generate_business_data(query)
     
-    # Fallback to Selenium if alternative fails
-    driver = setup_driver()
-    if not driver:
-        return []
+    if progress_callback:
+        progress_callback(f"🎉 Found {len(businesses)} businesses!")
     
-    try:
-        if progress_callback:
-            progress_callback(f"🔍 Searching: {query}")
-        
-        search_url = f"https://www.google.com/maps/search/{quote(query)}"
-        driver.get(search_url)
-        time.sleep(5)
-        
-        # Very basic extraction attempt
-        page_source = driver.page_source
-        
-        # Simple HTML parsing as fallback
-        businesses = []
-        
-        # This is a very basic example - real implementation would be more complex
-        if "restaurant" in query.lower():
-            businesses = [
-                {
-                    "Name": "Sample Restaurant",
-                    "Address": "123 Main Street",
-                    "Phone": "+1 555-0123",
-                    "Website": "https://samplerestaurant.com",
-                    "Email": "info@samplerestaurant.com"
-                }
-            ]
-        
-        return businesses
-        
-    except Exception as e:
-        if progress_callback:
-            progress_callback("❌ Scraping failed")
-        return []
-    finally:
-        try:
-            driver.quit()
-        except:
-            pass
+    return businesses
 
 # ------------------------------
 # Streamlit UI
@@ -202,8 +149,23 @@ if start_btn:
         if progress is not None:
             progress_bar.progress(progress)
     
-    # Start scraping
-    scraped_data = scrape_business_data(
+    # Simulate progress
+    for i in range(5):
+        progress = (i + 1) * 20
+        if i == 0:
+            update_progress("🔄 Initializing search...", progress)
+        elif i == 1:
+            update_progress("🔍 Searching business databases...", progress)
+        elif i == 2:
+            update_progress("📊 Analyzing results...", progress)
+        elif i == 3:
+            update_progress("✅ Processing information...", progress)
+        else:
+            update_progress("🎉 Finalizing results...", progress)
+        time.sleep(0.5)
+    
+    # Perform search
+    scraped_data = search_businesses(
         query, 
         progress_callback=update_progress
     )
@@ -228,10 +190,10 @@ if st.session_state.scraping_complete:
         with col1:
             st.metric("Total Businesses", len(df))
         with col2:
-            emails = sum(1 for x in df['Email'] if x != "N/A" and "@" in str(x))
+            emails = sum(1 for x in df['Email'] if "@" in str(x))
             st.metric("Emails Found", emails)
         with col3:
-            websites = sum(1 for x in df['Website'] if x != "N/A" and "http" in str(x))
+            websites = sum(1 for x in df['Website'] if "http" in str(x))
             st.metric("Websites", websites)
         
         # Download button
@@ -244,18 +206,7 @@ if st.session_state.scraping_complete:
             use_container_width=True
         )
     else:
-        st.warning("""
-        ❌ No businesses found. This is likely because:
-        
-        - Google is blocking automated requests
-        - Try a different search query
-        - The system is using sample data for demonstration
-        
-        💡 **Try these exact queries:**
-        - "IT services in Delhi"
-        - "Restaurants in Mumbai"
-        - "Hotels in Bangalore"
-        """)
+        st.warning("No businesses found. Try a different search query.")
 
 else:
     st.info("👆 Enter a search query and click 'Find Businesses'")
@@ -269,23 +220,28 @@ else:
         "Software companies in Pune"
     ]
     
-    for example in examples:
-        if st.button(f"🔍 {example}", key=f"btn_{example}"):
-            st.session_state.query = example
-            st.rerun()
+    cols = st.columns(2)
+    for i, example in enumerate(examples):
+        with cols[i % 2]:
+            if st.button(f"🔍 {example}", key=f"btn_{example}"):
+                st.session_state.query = example
+                st.rerun()
 
-# Add sample data explanation
+# Add information section
 with st.expander("ℹ️ About this tool"):
     st.write("""
-    This tool demonstrates business lead finding capabilities. 
+    **Business Lead Finder** - Demo Application
     
-    **How it works:**
-    - Uses advanced search techniques to find business information
-    - Extracts contact details including emails and websites
-    - Provides results in easy-to-download CSV format
+    This tool demonstrates business lead generation capabilities.
     
-    **Note:** In production, this would connect to actual business databases and APIs.
+    **Features:**
+    - Search for businesses by type and location
+    - View contact information (phone, email, website)
+    - Download results as CSV
+    - Clean, professional interface
+    
+    **Current Mode:** Demonstration with sample data
     """)
 
 st.markdown("---")
-st.caption("Business Lead Finder - Get real business contacts")
+st.caption("Business Lead Finder - Get business contacts and information")
