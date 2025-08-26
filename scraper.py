@@ -66,14 +66,14 @@ def extract_emails_from_website(driver, website_url):
 
     try:
         driver.get(website_url)
-        time.sleep(2)
+        time.sleep(1)  # Reduced to save time
         soup = BeautifulSoup(driver.page_source, "html.parser")
         found_emails.update(email_pattern.findall(soup.get_text()))
 
-        for link in ["contact", "about", "support"]:
+        for link in ["contact"]:  # Limited to one page to save time
             try:
                 driver.get(urljoin(website_url, link))
-                time.sleep(1.5)
+                time.sleep(1)
                 soup = BeautifulSoup(driver.page_source, "html.parser")
                 found_emails.update(email_pattern.findall(soup.get_text()))
             except:
@@ -83,83 +83,87 @@ def extract_emails_from_website(driver, website_url):
     except:
         return "N/A"
 
-# Main scraping function
-def scrape_google_maps(query, num_pages=1, logger=print):
+# Main scraping function with 1-minute timeout
+def scrape_google_maps(query, logger=print):
     driver = setup_driver()
     scraped_data = []
     seen_businesses = set()
+    start_time = time.time()
 
     try:
         search_url = f"https://www.google.com/maps/search/{quote(query)}"
         logger(f"🔎 Opening: {search_url}")
         driver.get(search_url)
-        time.sleep(15)
+        time.sleep(5)  # Reduced to save time
 
-        for page in range(num_pages):
-            logger(f"📄 Scraping page {page+1}...")
-            scrollable_div = WebDriverWait(driver, 20).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, 'div[role="feed"]'))
-            )
+        scrollable_div = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, 'div[role="feed"]'))
+        )
 
-            last_height = driver.execute_script("return arguments[0].scrollHeight", scrollable_div)
-            while True:
-                driver.execute_script("arguments[0].scrollTop = arguments[0].scrollHeight", scrollable_div)
-                time.sleep(random.uniform(1.5, 2.5))
-                new_height = driver.execute_script("return arguments[0].scrollHeight", scrollable_div)
-                if new_height == last_height:
-                    break
-                last_height = new_height
+        last_height = driver.execute_script("return arguments[0].scrollHeight", scrollable_div)
+        while time.time() - start_time < 50:  # Leave 10 seconds for processing
+            driver.execute_script("arguments[0].scrollTop = arguments[0].scrollHeight", scrollable_div)
+            time.sleep(random.uniform(1, 2))
+            new_height = driver.execute_script("return arguments[0].scrollHeight", scrollable_div)
+            if new_height == last_height:
+                break
+            last_height = new_height
 
-            cards = WebDriverWait(driver, 20).until(
-                EC.presence_of_all_elements_located((By.CSS_SELECTOR, 'a[href*="/maps/place/"]'))
-            )
-            cards = list({card.get_attribute("href"): card for card in cards}.values())
+        cards = WebDriverWait(driver, 10).until(
+            EC.presence_of_all_elements_located((By.CSS_SELECTOR, 'a[href*="/maps/place/"]'))
+        )
+        cards = list({card.get_attribute("href"): card for card in cards}.values())[:10]  # Limit to 10 for speed
 
-            for i, card in enumerate(cards):
+        for i, card in enumerate(cards):
+            if time.time() - start_time >= 60:
+                logger("⏰ 1-minute timeout reached, stopping scrape")
+                break
+
+            try:
+                href = card.get_attribute("href")
+                driver.execute_script("window.open(arguments[0]);", href)
+                driver.switch_to.window(driver.window_handles[-1])
+                time.sleep(1)  # Reduced to save time
+
                 try:
-                    href = card.get_attribute("href")
-                    driver.execute_script("window.open(arguments[0]);", href)
-                    driver.switch_to.window(driver.window_handles[-1])
-                    time.sleep(2)
+                    name = driver.find_element(By.CSS_SELECTOR, 'h1.DUwDvf').text.strip()
+                except:
+                    name = "N/A"
 
-                    try:
-                        name = driver.find_element(By.CSS_SELECTOR, 'h1.DUwDvf').text.strip()
-                    except:
-                        name = "N/A"
+                try:
+                    address = driver.find_element(By.CSS_SELECTOR, 'button[aria-label*="Address"]').text.strip()
+                except:
+                    address = "N/A"
 
-                    try:
-                        address = driver.find_element(By.CSS_SELECTOR, 'button[aria-label*="Address"]').text.strip()
-                    except:
-                        address = "N/A"
+                if (name, address) in seen_businesses:
+                    driver.close()
+                    driver.switch_to.window(driver.window_handles[0])
+                    continue
+                seen_businesses.add((name, address))
 
-                    if (name, address) in seen_businesses:
-                        driver.close()
-                        driver.switch_to.window(driver.window_handles[0])
-                        continue
-                    seen_businesses.add((name, address))
+                try:
+                    phone = driver.find_element(By.CSS_SELECTOR, 'button[aria-label*="Phone"]').text.strip()
+                except:
+                    phone = "N/A"
 
-                    try:
-                        phone = driver.find_element(By.CSS_SELECTOR, 'button[aria-label*="Phone"]').text.strip()
-                    except:
-                        phone = "N/A"
+                try:
+                    website = driver.find_element(By.CSS_SELECTOR, 'a[data-tooltip="Open website"]').get_attribute("href")
+                except:
+                    website = "N/A"
 
-                    try:
-                        website = driver.find_element(By.CSS_SELECTOR, 'a[data-tooltip="Open website"]').get_attribute("href")
-                    except:
-                        website = "N/A"
+                try:
+                    rating = driver.find_element(By.CSS_SELECTOR, 'span[aria-label*="star rating"]').text.strip()
+                except:
+                    rating = "N/A"
 
-                    try:
-                        rating = driver.find_element(By.CSS_SELECTOR, 'span[aria-label*="star rating"]').text.strip()
-                    except:
-                        rating = "N/A"
+                try:
+                    email = driver.find_element(By.CSS_SELECTOR, 'a[href^="mailto:"]').get_attribute("href").replace("mailto:", "")
+                except:
+                    email = "N/A"
+                if email == "N/A" and website != "N/A":
+                    email = extract_emails_from_website(driver, website)
 
-                    try:
-                        email = driver.find_element(By.CSS_SELECTOR, 'a[href^="mailto:"]').get_attribute("href").replace("mailto:", "")
-                    except:
-                        email = "N/A"
-                    if email == "N/A" and website != "N/A":
-                        email = extract_emails_from_website(driver, website)
-
+                if email != "N/A" and phone != "N/A":
                     scraped_data.append({
                         "Name": name,
                         "Address": address,
@@ -168,17 +172,16 @@ def scrape_google_maps(query, num_pages=1, logger=print):
                         "Email": email,
                         "Rating": rating
                     })
-                    if email == "N/A":
-                        logger(f"Skipped {name}: No email found")
+                    logger(f"✅ Found: {name} (Email: {email}, Phone: {phone})")
 
-                    driver.close()
-                    driver.switch_to.window(driver.window_handles[0])
+                driver.close()
+                driver.switch_to.window(driver.window_handles[0])
 
-                except Exception as e:
-                    logger(f"⚠️ Error scraping business card {i+1}: {str(e)}")
-                    driver.close()
-                    driver.switch_to.window(driver.window_handles[0])
-                    continue
+            except Exception as e:
+                logger(f"⚠️ Error scraping business card {i+1}: {str(e)}")
+                driver.close()
+                driver.switch_to.window(driver.window_handles[0])
+                continue
 
     except Exception as e:
         logger(f"❌ Scraping failed: {str(e)}")
@@ -186,4 +189,5 @@ def scrape_google_maps(query, num_pages=1, logger=print):
     finally:
         driver.quit()
 
+    logger(f"Scrape completed in {time.time() - start_time:.2f} seconds")
     return scraped_data
