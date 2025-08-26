@@ -50,12 +50,6 @@ def setup_driver():
 
         # Stealth mode
         driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-        driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
-            "source": """
-                Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-                window.chrome = {runtime: {},};
-            """
-        })
         
         return driver
         
@@ -66,37 +60,24 @@ def setup_driver():
 # ------------------------------
 # Email extractor from website
 # ------------------------------
+def extract_emails_from_text(text):
+    email_pattern = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
+    emails = email_pattern.findall(text)
+    return emails[0] if emails else "N/A"
+
 def extract_emails_from_website(driver, website_url):
-    if not website_url or website_url == "N/A":
+    if not website_url or website_url == "N/A" or not isinstance(website_url, str):
         return "N/A"
     
     if not website_url.startswith("http"):
         website_url = "https://" + website_url
 
-    email_pattern = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
-    found_emails = set()
-
     try:
         driver.get(website_url)
         time.sleep(2)
-        soup = BeautifulSoup(driver.page_source, "html.parser")
-        text_content = soup.get_text()
-        found_emails.update(email_pattern.findall(text_content))
-
-        # Try common contact pages
-        for link in ["contact", "about", "contact-us", "about-us", "contact.html", "about.html"]:
-            try:
-                contact_url = urljoin(website_url, link)
-                driver.get(contact_url)
-                time.sleep(1)
-                soup = BeautifulSoup(driver.page_source, "html.parser")
-                found_emails.update(email_pattern.findall(soup.get_text()))
-            except:
-                continue
-
-        return list(found_emails)[0] if found_emails else "N/A"
-        
-    except Exception as e:
+        page_source = driver.page_source
+        return extract_emails_from_text(page_source)
+    except:
         return "N/A"
 
 # ------------------------------
@@ -105,6 +86,8 @@ def extract_emails_from_website(driver, website_url):
 def scrape_google_maps_real(query, num_pages=1, progress_callback=None):
     driver = setup_driver()
     if not driver:
+        if progress_callback:
+            progress_callback("❌ Failed to initialize browser")
         return []
     
     scraped_data = []
@@ -123,43 +106,44 @@ def scrape_google_maps_real(query, num_pages=1, progress_callback=None):
                 progress_callback(f"📄 Page {page + 1}/{num_pages}")
             
             try:
-                # Wait for and scroll the results
-                scrollable_div = WebDriverWait(driver, 20).until(
+                # Wait for results to load
+                WebDriverWait(driver, 15).until(
                     EC.presence_of_element_located((By.CSS_SELECTOR, 'div[role="feed"]'))
                 )
                 
                 # Scroll to load more results
-                for i in range(3):
+                scrollable_div = driver.find_element(By.CSS_SELECTOR, 'div[role="feed"]')
+                for i in range(2):
                     driver.execute_script(
                         "arguments[0].scrollTop = arguments[0].scrollHeight", scrollable_div
                     )
-                    if progress_callback:
-                        progress_callback(f"⬇️ Scrolling ({i + 1}/3)")
                     time.sleep(random.uniform(1, 2))
                 
-                # Find business cards
-                cards = driver.find_elements(By.CSS_SELECTOR, 'div[role="article"]')
+                # Find business listings
+                listings = driver.find_elements(By.CSS_SELECTOR, 'div[role="article"]')
                 if progress_callback:
-                    progress_callback(f"📊 Found {len(cards)} businesses")
+                    progress_callback(f"📊 Found {len(listings)} businesses")
                 
-                for i, card in enumerate(cards):
+                for i, listing in enumerate(listings):
                     try:
-                        # Click on the card to expand details
-                        card.click()
+                        # Click on listing to get details
+                        listing.click()
                         time.sleep(2)
                         
-                        # Extract business information
+                        # Extract information from details panel
                         business_data = {}
                         
+                        # Name
                         try:
-                            name_elem = driver.find_element(By.CSS_SELECTOR, "h1")
+                            name_elem = driver.find_element(By.CSS_SELECTOR, 'h1')
                             business_data["Name"] = name_elem.text.strip()
                         except:
                             business_data["Name"] = "N/A"
-                            
+                        
+                        # Address
                         try:
-                            address_elem = driver.find_element(By.CSS_SELECTOR, 'button[data-item-id="address"]')
-                            business_data["Address"] = address_elem.text.strip()
+                            address_elems = driver.find_elements(By.CSS_SELECTOR, 'button[aria-label*="ddress"]')
+                            business_data["Address"] = address_elems[0].text.strip() if address_elems else "N/A"
                         except:
                             business_data["Address"] = "N/A"
                         
@@ -168,21 +152,24 @@ def scrape_google_maps_real(query, num_pages=1, progress_callback=None):
                             continue
                         seen_businesses.add((business_data["Name"], business_data["Address"]))
                         
+                        # Phone
                         try:
-                            phone_elem = driver.find_element(By.CSS_SELECTOR, 'button[data-item-id*="phone"]')
-                            business_data["Phone"] = phone_elem.text.strip()
+                            phone_elems = driver.find_elements(By.CSS_SELECTOR, 'button[aria-label*="hone"]')
+                            business_data["Phone"] = phone_elems[0].text.strip() if phone_elems else "N/A"
                         except:
                             business_data["Phone"] = "N/A"
-                            
+                        
+                        # Website
                         try:
-                            website_elem = driver.find_element(By.CSS_SELECTOR, 'a[href*="://"]')
-                            business_data["Website"] = website_elem.get_attribute("href")
+                            website_elems = driver.find_elements(By.CSS_SELECTOR, 'a[href*="://"]')
+                            business_data["Website"] = website_elems[0].get_attribute("href") if website_elems else "N/A"
                         except:
                             business_data["Website"] = "N/A"
-                            
+                        
+                        # Rating
                         try:
-                            rating_elem = driver.find_element(By.CSS_SELECTOR, 'span[aria-label*="star"]')
-                            business_data["Rating"] = rating_elem.get_attribute("aria-label")
+                            rating_elems = driver.find_elements(By.CSS_SELECTOR, 'span[aria-label*="tar"]')
+                            business_data["Rating"] = rating_elems[0].get_attribute("aria-label") if rating_elems else "N/A"
                         except:
                             business_data["Rating"] = "N/A"
                         
@@ -192,10 +179,10 @@ def scrape_google_maps_real(query, num_pages=1, progress_callback=None):
                             business_data["Email"] = extract_emails_from_website(driver, business_data["Website"])
                         
                         # Only add if we have valid data
-                        if business_data["Name"] != "N/A" and business_data["Email"] != "N/A":
+                        if business_data["Name"] != "N/A" and business_data["Name"]:
                             scraped_data.append(business_data)
                             if progress_callback:
-                                progress_callback(f"✅ Found: {business_data['Name']}")
+                                progress_callback(f"✅ Found: {business_data['Name'][:30]}...")
                         
                     except Exception as e:
                         continue
@@ -206,12 +193,12 @@ def scrape_google_maps_real(query, num_pages=1, progress_callback=None):
                 break
             except Exception as e:
                 if progress_callback:
-                    progress_callback(f"⚠️ Error on page {page + 1}: {e}")
+                    progress_callback(f"⚠️ Error on page {page + 1}")
                 continue
                 
     except Exception as e:
         if progress_callback:
-            progress_callback(f"❌ Scraping failed: {e}")
+            progress_callback(f"❌ Scraping failed")
     finally:
         try:
             driver.quit()
@@ -244,15 +231,14 @@ if 'scraping' not in st.session_state:
 with st.sidebar:
     st.header("⚙️ Settings")
     query = st.text_input("Search query", "restaurants in mumbai", key="query")
-    pages = st.number_input("Pages to scrape", min_value=1, max_value=3, value=1, key="pages")
+    pages = st.number_input("Pages to scrape", min_value=1, max_value=2, value=1, key="pages")
     
     start_btn = st.button("🚀 Start Real Scraping", key="start_btn", type="primary", use_container_width=True)
     
     st.warning("""
     **Important:** 
-    - Real scraping takes 2-5 minutes per page
+    - Real scraping takes 2-5 minutes
     - Only businesses with emails are collected
-    - Cloud scraping may be detected sometimes
     - Be patient during scraping
     """)
 
@@ -264,7 +250,6 @@ if start_btn:
     
     progress_bar = st.progress(0)
     status_text = st.empty()
-    results_placeholder = st.empty()
     
     def update_progress(message, progress=None):
         status_text.write(f"**{message}**")
@@ -294,15 +279,6 @@ if st.session_state.scraping_complete:
         # Display results
         st.dataframe(df, use_container_width=True)
         
-        # Show statistics
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Total Leads", len(df))
-        with col2:
-            st.metric("With Email", f"{len(df)}/{len(df)}")
-        with col3:
-            st.metric("Success Rate", "100%")
-        
         # Download button
         csv = df.to_csv(index=False).encode('utf-8')
         st.download_button(
@@ -313,11 +289,11 @@ if st.session_state.scraping_complete:
             use_container_width=True
         )
     else:
-        st.warning("❌ No businesses with email addresses were found. Try a different search query or location.")
+        st.warning("❌ No businesses found. Try a different search query.")
 
 else:
     # Show instructions when not scraping
-    st.info("👆 Click 'Start Real Scraping' to begin searching for REAL business leads")
+    st.info("👆 Click 'Start Real Scraping' to begin")
     
     col1, col2 = st.columns(2)
     
@@ -325,7 +301,7 @@ else:
         st.write("""
         ### 📋 How to use:
         1. Enter your search query
-        2. Select number of pages (1-3)
+        2. Select number of pages (1-2)
         3. Click "Start Real Scraping"
         4. Wait 2-5 minutes
         5. Download real leads
@@ -335,13 +311,12 @@ else:
         st.write("""
         ### 🎯 Best search examples:
         - "restaurants mumbai"
-        - "hotels in delhi"
+        - "hotels in delhi" 
         - "it companies bangalore"
-        - "dentists near me"
-        - "marketing agencies"
         - "cafe pune"
+        - "dentists near me"
         """)
 
 # Add footer
 st.markdown("---")
-st.caption("🔍 Scraping real data from Google Maps - This may take several minutes")
+st.caption("🔍 Scraping real data from Google Maps")
