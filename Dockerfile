@@ -34,15 +34,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     || { echo "apt-get install failed"; cat /var/log/apt/term.log; exit 1; }
 
-# Install specific ChromeDriver version matching Chromium
-RUN CHROMIUM_VERSION=$(chromium --version | grep -oP 'Chromium \K\d+' || echo "120") \
-    && wget -q --continue -P /tmp "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_${CHROMIUM_VERSION}" \
-    && CHROMEDRIVER_VERSION=$(cat /tmp/LATEST_RELEASE_${CHROMIUM_VERSION}) \
-    && wget -q --continue -P /usr/bin "https://chromedriver.storage.googleapis.com/${CHROMEDRIVER_VERSION}/chromedriver-linux64.zip" \
+# Verify Chromium installation
+RUN chromium --version || { echo "Chromium not found"; exit 1; }
+
+# Install specific ChromeDriver version
+ENV CHROMEDRIVER_VERSION="120.0.6099.129"
+RUN wget -q --continue -P /usr/bin "https://chromedriver.storage.googleapis.com/${CHROMEDRIVER_VERSION}/chromedriver-linux64.zip" \
     && unzip /usr/bin/chromedriver-linux64.zip -d /usr/bin/ \
-    && rm /usr/bin/chromedriver-linux64.zip /tmp/LATEST_RELEASE_${CHROMIUM_VERSION} \
+    && rm /usr/bin/chromedriver-linux64.zip \
     && chmod +x /usr/bin/chromedriver \
-    || { echo "ChromeDriver download failed"; exit 1; }
+    || { echo "ChromeDriver download or setup failed"; exit 1; }
 
 # Env vars for Selenium
 ENV CHROME_BIN=/usr/bin/chromium
