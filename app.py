@@ -93,7 +93,7 @@ def extract_emails_from_website(driver, website_url):
         return "N/A"
 
 # ------------------------------
-# Google Maps Scraper with 1-minute timeout
+# Google Maps Scraper
 # ------------------------------
 def scrape_google_maps(query, num_pages=1):
     import logging
@@ -104,34 +104,26 @@ def scrape_google_maps(query, num_pages=1):
     driver = setup_driver()
     scraped_data = []
     seen_businesses = set()
-    start_time = time.time()
 
     try:
         search_url = f"https://www.google.com/maps/search/{quote(query)}"
         driver.get(search_url)
         time.sleep(3)
 
-        for page in range(min(num_pages, 1)):  # Limit to 1 page for 1-minute constraint
+        for page in range(num_pages):
             scrollable_div = WebDriverWait(driver, 10).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, 'div[role="feed"]'))
             )
             for _ in range(5):
-                if time.time() - start_time >= 60:
-                    logger.warning("⏰ 1-minute timeout reached, stopping scrape")
-                    break
                 driver.execute_script(
                     "arguments[0].scrollTop = arguments[0].scrollHeight", scrollable_div
                 )
                 time.sleep(random.uniform(1, 2))
 
             cards = driver.find_elements(By.CSS_SELECTOR, 'a[href*="/maps/place/"]')
-            cards = list({card.get_attribute("href"): card for card in cards}.values())[:10]  # Limit to 10
+            cards = list({card.get_attribute("href"): card for card in cards}.values())
 
             for card in cards:
-                if time.time() - start_time >= 60:
-                    logger.warning("⏰ 1-minute timeout reached, stopping scrape")
-                    break
-
                 try:
                     href = card.get_attribute("href")
                     driver.execute_script("window.open(arguments[0]);", href)
@@ -210,39 +202,40 @@ def scrape_google_maps(query, num_pages=1):
                     driver.switch_to.window(driver.window_handles[0])
                     continue
 
-        logger.info(f"Scrape completed in {time.time() - start_time:.2f} seconds")
+        driver.quit()
+        logger.info(f"Scrape completed.")
         return scraped_data
 
     except Exception as e:
         logger.error(f"❌ Scraping failed: {str(e)}")
-        return scraped_data
-    finally:
         driver.quit()
+        return scraped_data
 
 # ------------------------------
 # Streamlit UI
 # ------------------------------
 st.title("Google Maps Lead Scraper Results")
-st.write("Automatically scraped results with both email and phone (max 1 minute).")
+st.write("Enter a search query and number of pages to scrape. Only results with both email and phone are collected.")
 
-# Hardcoded query and pages, run on load
-query = "IT services in Delhi"
-pages = 1
+query = st.text_input("Search query", "IT services in Delhi")
+pages = st.number_input("Pages to scrape", min_value=1, max_value=5, value=1)
+start_btn = st.button("Start Scraping")
 
-# Run scrape on page load
-data = scrape_google_maps(query, pages)
+if start_btn:
+    with st.spinner("Scraping in progress..."):
+        data = scrape_google_maps(query, pages)
 
-if data:
-    df = pd.DataFrame(data)
-    st.success(f"Scraping complete! {len(df)} results found with email and phone.")
-    st.table(df)  # Display as table
+    if data:
+        df = pd.DataFrame(data)
+        st.success(f"Scraping complete! {len(df)} results found with email and phone.")
+        st.table(df)  # Display as table
 
-    csv = df.to_csv(index=False).encode("utf-8")
-    st.download_button(
-        label="Download CSV",
-        data=csv,
-        file_name="scraped_leads.csv",
-        mime="text/csv",
-    )
-else:
-    st.warning("No results found with both email and phone.")
+        csv = df.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            label="Download CSV",
+            data=csv,
+            file_name="scraped_leads.csv",
+            mime="text/csv",
+        )
+    else:
+        st.warning("No results found with both email and phone.")
