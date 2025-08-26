@@ -12,6 +12,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import chromedriver_autoinstaller
 import logging
+import subprocess
 
 # Set up logging to display in Streamlit
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -20,9 +21,17 @@ logger = logging.getLogger(__name__)
 # ------------------------------
 # Setup Selenium Chrome driver
 # ------------------------------
-def setup_driver(timeout=60):  # Added timeout parameter
+def setup_driver(timeout=60):
     chromedriver_autoinstaller.install()
     logger.info("Installing ChromeDriver...")
+
+    # Get Chromium version
+    try:
+        chrom_version = subprocess.check_output(['chromium', '--version']).decode().strip()
+        logger.info(f"Chromium version: {chrom_version}")
+    except Exception as e:
+        logger.error(f"Failed to get Chromium version: {str(e)}")
+        chrom_version = "unknown"
 
     options = Options()
     options.add_argument("--headless=new")  # Required for Render
@@ -49,8 +58,18 @@ def setup_driver(timeout=60):  # Added timeout parameter
         },
     )
 
-    driver = webdriver.Chrome(options=options)
-    logger.info("ChromeDriver initialized.")
+    try:
+        driver = webdriver.Chrome(options=options)
+        logger.info("ChromeDriver initialized successfully.")
+    except Exception as e:
+        logger.error(f"ChromeDriver initialization failed: {str(e)}. Attempting manual setup...")
+        # Manual ChromeDriver download (example for Chromium 120)
+        import os
+        chromedriver_path = "/usr/bin/chromedriver"
+        if not os.path.exists(chromedriver_path):
+            logger.error("Manual ChromeDriver setup not implemented. Please update Dockerfile.")
+            raise
+        driver = webdriver.Chrome(executable_path=chromedriver_path, options=options)
 
     # Anti-detection tweaks
     driver.execute_script(
