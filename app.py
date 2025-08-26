@@ -290,56 +290,51 @@ if start_btn:
     
     update_progress("🔄 Initializing scraper...", 10)
     
-    # Run scraping in a thread to avoid blocking
-    import threading
+    # Use session state to store scraped data
+    if 'scraped_data' not in st.session_state:
+        st.session_state.scraped_data = []
+    if 'scraping_error' not in st.session_state:
+        st.session_state.scraping_error = None
     
-    scraped_data = []
-    error_message = None
+    # Run scraping directly (simpler approach without threading issues)
+    try:
+        scraped_data = scrape_google_maps(
+            query, 
+            pages, 
+            progress_callback=update_progress
+        )
+        st.session_state.scraped_data = scraped_data
+        st.session_state.scraping_error = None
+        
+    except Exception as e:
+        st.session_state.scraping_error = str(e)
+        st.session_state.scraped_data = []
     
-    def scraping_thread():
-        nonlocal scraped_data, error_message
-        try:
-            scraped_data = scrape_google_maps(
-                query, 
-                pages, 
-                progress_callback=update_progress
-            )
-        except Exception as e:
-            error_message = str(e)
-    
-    thread = threading.Thread(target=scraping_thread)
-    thread.start()
-    
-    # Wait for thread to complete with timeout
-    thread.join(timeout=300)  # 5 minute timeout
-    
-    if thread.is_alive():
-        update_progress("⏰ Scraping timed out after 5 minutes", 100)
-        st.error("Scraping took too long. Please try with fewer pages or a simpler query.")
+    # Display results
+    if st.session_state.scraping_error:
+        update_progress(f"❌ Error: {st.session_state.scraping_error}", 100)
+        st.error(f"Scraping failed: {st.session_state.scraping_error}")
+        
+    elif st.session_state.scraped_data:
+        update_progress(f"✅ Scraping complete! Found {len(st.session_state.scraped_data)} leads with emails.", 100)
+        
+        df = pd.DataFrame(st.session_state.scraped_data)
+        st.success(f"🎉 Successfully scraped {len(df)} leads!")
+        
+        # Display results
+        st.dataframe(df, use_container_width=True)
+        
+        # Download button
+        csv = df.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            label="📥 Download CSV",
+            data=csv,
+            file_name=f"leads_{query.replace(' ', '_')}.csv",
+            mime="text/csv",
+        )
     else:
-        if error_message:
-            update_progress(f"❌ Error: {error_message}", 100)
-            st.error(f"Scraping failed: {error_message}")
-        elif scraped_data:
-            update_progress(f"✅ Scraping complete! Found {len(scraped_data)} leads with emails.", 100)
-            
-            df = pd.DataFrame(scraped_data)
-            st.success(f"🎉 Successfully scraped {len(df)} leads!")
-            
-            # Display results
-            st.dataframe(df, use_container_width=True)
-            
-            # Download button
-            csv = df.to_csv(index=False).encode("utf-8")
-            st.download_button(
-                label="📥 Download CSV",
-                data=csv,
-                file_name=f"leads_{query.replace(' ', '_')}.csv",
-                mime="text/csv",
-            )
-        else:
-            update_progress("❌ No results found with emails.", 100)
-            st.warning("No businesses with email addresses were found. Try a different search query.")
+        update_progress("❌ No results found with emails.", 100)
+        st.warning("No businesses with email addresses were found. Try a different search query.")
 
 else:
     st.info("👆 Click 'Start Scraping' to begin")
