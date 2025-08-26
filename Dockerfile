@@ -1,16 +1,19 @@
 FROM python:3.11-slim
 
-# Install Chrome and dependencies for Render
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
     wget \
     unzip \
     curl \
+    gnupg \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Chromium browser
-RUN apt-get update && apt-get install -y \
-    chromium \
-    chromium-driver \
+# Install Google Chrome (not Chromium)
+RUN wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | apt-key add - \
+    && echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list \
+    && apt-get update \
+    && apt-get install -y \
+    google-chrome-stable \
     fonts-liberation \
     libasound2 \
     libatk-bridge2.0-0 \
@@ -36,21 +39,16 @@ RUN apt-get update && apt-get install -y \
     xdg-utils \
     && rm -rf /var/lib/apt/lists/*
 
-# Detect Chromium version and install matching ChromeDriver
-RUN CHROMIUM_VERSION=$(chromium --version | grep -oP 'Chromium \K\d+\.\d+\.\d+\.\d+') \
-    && echo "Detected Chromium version: $CHROMIUM_VERSION" \
-    && MAJOR_VERSION=$(echo $CHROMIUM_VERSION | cut -d. -f1) \
-    && echo "Major version: $MAJOR_VERSION" \
-    # Download the matching ChromeDriver version
+# Install ChromeDriver that matches Chrome version
+RUN CHROME_VERSION=$(google-chrome --version | grep -oP 'Google Chrome \K\d+') \
+    && echo "Detected Chrome version: $CHROME_VERSION" \
+    && CHROMEDRIVER_VERSION=$(curl -s "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_$CHROME_VERSION") \
+    && echo "Matching ChromeDriver version: $CHROMEDRIVER_VERSION" \
     && wget -q --continue -O /tmp/chromedriver-linux64.zip \
-       "https://edgedl.me.gvt1.com/edgedl/chrome/chrome-for-testing/${CHROMIUM_VERSION}/linux64/chromedriver-linux64.zip" \
-    || wget -q --continue -O /tmp/chromedriver-linux64.zip \
-       "https://storage.googleapis.com/chrome-for-testing-public/${CHROMIUM_VERSION}/linux64/chromedriver-linux64.zip" \
-    || { echo "Failed to download ChromeDriver for version ${CHROMIUM_VERSION}"; exit 1; } \
-    && unzip /tmp/chromedriver-linux64.zip -d /tmp/ \
-    && mv /tmp/chromedriver-linux64/chromedriver /usr/local/bin/ \
+       "https://chromedriver.storage.googleapis.com/$CHROMEDRIVER_VERSION/chromedriver-linux64.zip" \
+    && unzip /tmp/chromedriver-linux64.zip -d /usr/local/bin/ \
     && chmod +x /usr/local/bin/chromedriver \
-    && rm -rf /tmp/chromedriver-linux64.zip /tmp/chromedriver-linux64/ \
+    && rm /tmp/chromedriver-linux64.zip \
     && echo "ChromeDriver installed successfully"
 
 WORKDIR /app
