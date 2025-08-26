@@ -1,14 +1,14 @@
 import re
 import time
 import random
-import pandas as pd
-import streamlit as st
 import traceback
 from urllib.parse import urljoin, quote
 from bs4 import BeautifulSoup
+
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import chromedriver_autoinstaller
@@ -16,16 +16,19 @@ import chromedriver_autoinstaller
 
 # Setup Selenium driver
 def setup_driver():
-    chromedriver_autoinstaller.install()  # auto-download matching chromedriver
+    # Auto-install ChromeDriver if not present
+    chromedriver_autoinstaller.install()
 
     options = Options()
-    options.add_argument("--headless=new")
+    options.add_argument("--headless=new")   # FIX for DevToolsActivePort
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--window-size=1920,1080")
-    options.add_argument("--disable-blink-features=AutomationControlled")
     options.add_argument("--disable-gpu")
+    options.add_argument("--disable-software-rasterizer")
     options.add_argument("--disable-extensions")
+    options.add_argument("--window-size=1920,1080")
+    options.add_argument("--remote-debugging-port=9222")
+    options.add_argument("--disable-blink-features=AutomationControlled")
 
     driver = webdriver.Chrome(options=options)
 
@@ -50,6 +53,7 @@ def extract_emails_from_website(driver, website_url):
         soup = BeautifulSoup(driver.page_source, "html.parser")
         found_emails.update(email_pattern.findall(soup.get_text()))
 
+        # Try extra pages
         for link in ["contact", "about", "support"]:
             try:
                 driver.get(urljoin(website_url, link))
@@ -65,21 +69,24 @@ def extract_emails_from_website(driver, website_url):
 
 
 # Main scraping function
-def scrape_google_maps(query, num_pages=1):
+def scrape_google_maps(query, num_pages=1, logger=print):
     driver = setup_driver()
     scraped_data = []
     seen_businesses = set()
 
     try:
         search_url = f"https://www.google.com/maps/search/{quote(query)}"
-        st.write(f"🔎 Opening: {search_url}")
+        logger(f"🔎 Opening: {search_url}")
         driver.get(search_url)
         time.sleep(5)
 
         for page in range(num_pages):
+            logger(f"📄 Scraping page {page+1}...")
             scrollable_div = WebDriverWait(driver, 10).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, 'div[role="feed"]'))
             )
+
+            # Scroll results
             for _ in range(5):
                 driver.execute_script("arguments[0].scrollTop = arguments[0].scrollHeight", scrollable_div)
                 time.sleep(random.uniform(1, 2))
@@ -125,7 +132,7 @@ def scrape_google_maps(query, num_pages=1):
                     except:
                         rating = "N/A"
 
-                    # Try to extract email directly or via website
+                    # Try to get email
                     try:
                         email = driver.find_element(By.CSS_SELECTOR, 'a[href^="mailto:"]').get_attribute("href").replace("mailto:", "")
                     except:
@@ -146,45 +153,17 @@ def scrape_google_maps(query, num_pages=1):
                     driver.close()
                     driver.switch_to.window(driver.window_handles[0])
 
-                except Exception:
-                    st.error("⚠️ Error scraping a business card")
-                    st.text(traceback.format_exc())
+                except Exception as e:
+                    logger("⚠️ Error scraping a business card")
+                    logger(traceback.format_exc())
                     driver.close()
                     driver.switch_to.window(driver.window_handles[0])
                     continue
 
-    except Exception:
-        st.error("❌ Scraping failed")
-        st.text(traceback.format_exc())
+    except Exception as e:
+        logger("❌ Scraping failed")
+        logger(traceback.format_exc())
     finally:
         driver.quit()
 
     return scraped_data
-
-
-# Streamlit UI
-st.title("Google Maps Lead Scraper")
-st.write("Enter a search query and number of pages to scrape. Only results with emails are collected.")
-
-query = st.text_input("Search query", "IT services in Delhi")
-pages = st.number_input("Pages to scrape", min_value=1, max_value=5, value=1)
-start_btn = st.button("Start Scraping")
-
-if start_btn:
-    with st.spinner("Scraping in progress..."):
-        data = scrape_google_maps(query, pages)
-
-    if data:
-        df = pd.DataFrame(data)
-        st.success(f"Scraping complete! {len(df)} results found.")
-        st.dataframe(df)
-
-        csv = df.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            label="Download CSV",
-            data=csv,
-            file_name="scraped_leads.csv",
-            mime="text/csv"
-        )
-    else:
-        st.warning("No results found with emails.")
