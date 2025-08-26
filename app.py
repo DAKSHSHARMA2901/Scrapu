@@ -1,15 +1,9 @@
 import re
 import time
-import random
 import pandas as pd
 import streamlit as st
 from urllib.parse import quote
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from playwright.sync_api import sync_playwright
 import logging
 
 # Setup basic logging
@@ -17,75 +11,26 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ------------------------------
-# Setup Chrome driver with better stealth
+# Setup Playwright browser
 # ------------------------------
-def setup_driver():
+def setup_browser():
     try:
-        options = Options()
-        options.add_argument("--headless=new")
-        options.add_argument("--no-sandbox")
-        options.add_argument("--disable-dev-shm-usage")
-        options.add_argument("--disable-gpu")
-        options.add_argument("--window-size=1920,1080")
-        
-        # Enhanced stealth options
-        options.add_argument("--disable-blink-features=AutomationControlled")
-        options.add_argument("--disable-extensions")
-        options.add_argument("--disable-plugins")
-        options.add_argument("--disable-images")
-        options.add_argument("--disable-popup-blocking")
-        options.add_argument("--disable-notifications")
-        options.add_argument("--disable-web-security")
-        options.add_argument("--allow-running-insecure-content")
-        
-        # Use system Chrome
-        options.binary_location = "/usr/bin/google-chrome-stable"
-        
-        # Advanced anti-detection
-        options.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
-        options.add_experimental_option("useAutomationExtension", False)
-        
-        # Set realistic user agent
-        options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-
-        driver = webdriver.Chrome(options=options)
-
-        # Advanced stealth JavaScript
-        driver.execute_script("""
-            Object.defineProperty(navigator, 'webdriver', {
-                get: () => undefined
-            });
-            
-            window.chrome = {
-                runtime: {},
-                app: {
-                    isInstalled: false,
-                    InstallState: {
-                        DISABLED: 'disabled',
-                        INSTALLED: 'installed',
-                        NOT_INSTALLED: 'not_installed'
-                    },
-                    RunningState: {
-                        CANNOT_RUN: 'cannot_run',
-                        READY_TO_RUN: 'ready_to_run',
-                        RUNNING: 'running'
-                    }
-                }
-            };
-            
-            const originalQuery = window.navigator.permissions.query;
-            window.navigator.permissions.query = (parameters) => (
-                parameters.name === 'notifications' ?
-                    Promise.resolve({ state: Notification.permission }) :
-                    originalQuery(parameters)
-            );
-        """)
-        
-        return driver
-        
+        playwright = sync_playwright().start()
+        browser = playwright.chromium.launch(
+            headless=True,
+            args=[
+                '--no-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+                '--window-size=1920,1080',
+                '--disable-blink-features=AutomationControlled',
+                '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            ]
+        )
+        return playwright, browser
     except Exception as e:
-        st.error(f"Failed to setup driver: {e}")
-        return None
+        st.error(f"Failed to setup browser: {e}")
+        return None, None
 
 # ------------------------------
 # Email extractor
@@ -96,148 +41,92 @@ def extract_emails_from_text(text):
     return emails[0] if emails else "N/A"
 
 # ------------------------------
-# Improved Google Maps Scraper
+# Playwright Google Maps Scraper
 # ------------------------------
-def scrape_google_maps_improved(query, progress_callback=None):
-    driver = setup_driver()
-    if not driver:
+def scrape_google_maps_playwright(query, progress_callback=None):
+    playwright, browser = setup_browser()
+    if not browser:
         if progress_callback:
             progress_callback("❌ Failed to initialize browser")
         return []
     
     scraped_data = []
-
+    
     try:
+        context = browser.new_context(
+            viewport={'width': 1920, 'height': 1080},
+            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        )
+        
+        page = context.new_page()
+        
         search_url = f"https://www.google.com/maps/search/{quote(query)}"
         if progress_callback:
             progress_callback(f"🔍 Searching: {query}")
         
-        driver.get(search_url)
-        time.sleep(random.uniform(3, 5))  # Random delay
-
-        # Wait for results with longer timeout
-        try:
-            WebDriverWait(driver, 20).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, '[role="feed"], .section-result, .searchbox'))
-            )
-        except TimeoutException:
-            if progress_callback:
-                progress_callback("❌ Timeout waiting for Google Maps")
-            return []
+        page.goto(search_url, timeout=30000)
+        page.wait_for_timeout(5000)
         
         if progress_callback:
             progress_callback("📊 Loading business listings...")
         
-        # Try multiple selectors for business listings
-        selectors = [
-            '[role="article"]',
-            '.section-result',
-            '.bfdHYd',
-            '.Nv2PK',
-            '.THOPZb'
-        ]
+        # Wait for results to load
+        page.wait_for_selector('[role="feed"], .section-result, .searchbox', timeout=15000)
         
-        listings = []
-        for selector in selectors:
-            try:
-                listings = driver.find_elements(By.CSS_SELECTOR, selector)
-                if listings:
-                    if progress_callback:
-                        progress_callback(f"✅ Found {len(listings)} businesses using {selector}")
-                    break
-            except:
-                continue
-        
-        if not listings:
+        # Scroll to load more results
+        for i in range(3):
+            page.evaluate('''() => {
+                const feed = document.querySelector('[role="feed"]');
+                if (feed) feed.scrollTop = feed.scrollHeight;
+            }''')
+            page.wait_for_timeout(2000)
             if progress_callback:
-                progress_callback("❌ No business listings found")
-            return []
+                progress_callback(f"⬇️ Scrolling ({i + 1}/3)")
         
-        # Limit to first 5 listings for stability
-        for i, listing in enumerate(listings[:5]):
+        # Get business listings
+        listings = page.query_selector_all('[role="article"], .section-result, .Nv2PK')
+        
+        if progress_callback:
+            progress_callback(f"✅ Found {len(listings)} businesses")
+        
+        for i, listing in enumerate(listings[:8]):  # Limit to 8
             try:
-                # Scroll element into view before clicking
-                driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", listing)
-                time.sleep(random.uniform(1, 2))
-                
+                # Click on the listing
                 listing.click()
-                time.sleep(random.uniform(2, 3))
+                page.wait_for_timeout(3000)
                 
-                # Extract information with multiple fallback selectors
+                # Extract information
                 business_data = {}
                 
-                # Name - multiple selectors
-                name_selectors = ['h1', '.fontHeadlineLarge', '[aria-hidden="true"]', '.section-hero-header-title']
-                for selector in name_selectors:
-                    try:
-                        name_elem = driver.find_element(By.CSS_SELECTOR, selector)
-                        if name_elem.text.strip():
-                            business_data["Name"] = name_elem.text.strip()
-                            break
-                    except:
-                        continue
-                else:
-                    business_data["Name"] = "N/A"
+                # Name
+                name_elem = page.query_selector('h1, .fontHeadlineLarge, [aria-hidden="true"]')
+                business_data["Name"] = name_elem.inner_text().strip() if name_elem else "N/A"
                 
-                # Address - multiple selectors
-                address_selectors = [
-                    'button[data-item-id*="address"]',
-                    '[aria-label*="ddress"]',
-                    '.section-info-text',
-                    '.rogA2c'
-                ]
-                for selector in address_selectors:
-                    try:
-                        address_elem = driver.find_element(By.CSS_SELECTOR, selector)
-                        if address_elem.text.strip():
-                            business_data["Address"] = address_elem.text.strip()
-                            break
-                    except:
-                        continue
-                else:
-                    business_data["Address"] = "N/A"
+                # Address
+                address_btn = page.query_selector('button[data-item-id*="address"], [aria-label*="ddress"]')
+                business_data["Address"] = address_btn.inner_text().strip() if address_btn else "N/A"
                 
-                # Phone - multiple selectors
-                phone_selectors = [
-                    'button[data-item-id*="phone"]',
-                    '[aria-label*="hone"]',
-                    '[aria-label*="all"]'
-                ]
-                for selector in phone_selectors:
-                    try:
-                        phone_elem = driver.find_element(By.CSS_SELECTOR, selector)
-                        if phone_elem.text.strip():
-                            business_data["Phone"] = phone_elem.text.strip()
-                            break
-                    except:
-                        continue
-                else:
-                    business_data["Phone"] = "N/A"
+                # Phone
+                phone_btn = page.query_selector('button[data-item-id*="phone"], [aria-label*="hone"]')
+                business_data["Phone"] = phone_btn.inner_text().strip() if phone_btn else "N/A"
                 
-                # Website - multiple approaches
-                business_data["Website"] = "N/A"
-                try:
-                    website_links = driver.find_elements(By.CSS_SELECTOR, 'a[href*="://"]')
-                    for link in website_links:
-                        href = link.get_attribute("href")
-                        if href and "google" not in href and "maps" not in href and not href.startswith("javascript"):
-                            business_data["Website"] = href
-                            break
-                except:
-                    pass
+                # Website
+                website_link = page.query_selector('a[href*="://"]:not([href*="google"])')
+                business_data["Website"] = website_link.get_attribute('href') if website_link else "N/A"
                 
-                # Extract email from page source
-                page_source = driver.page_source
-                business_data["Email"] = extract_emails_from_text(page_source)
+                # Extract email from page
+                page_content = page.content()
+                business_data["Email"] = extract_emails_from_text(page_content)
                 
                 # Only add if we have a valid name
                 if business_data["Name"] != "N/A" and business_data["Name"].strip():
                     scraped_data.append(business_data)
                     if progress_callback:
-                        progress_callback(f"📝 Added: {business_data['Name'][:25]}...")
+                        progress_callback(f"📝 Added: {business_data['Name'][:20]}...")
                 
-                # Small delay between listings
-                time.sleep(random.uniform(1, 2))
+                # Go back to results
+                page.go_back()
+                page.wait_for_timeout(2000)
                 
             except Exception as e:
                 if progress_callback:
@@ -246,14 +135,63 @@ def scrape_google_maps_improved(query, progress_callback=None):
                 
     except Exception as e:
         if progress_callback:
-            progress_callback(f"❌ Error: {str(e)}")
+            progress_callback(f"❌ Error during scraping")
     finally:
         try:
-            driver.quit()
+            browser.close()
+            playwright.stop()
         except:
             pass
             
     return scraped_data
+
+# ------------------------------
+# Alternative: Direct HTML parsing approach
+# ------------------------------
+def scrape_google_maps_simple(query, progress_callback=None):
+    """Fallback method using direct requests and HTML parsing"""
+    import requests
+    from bs4 import BeautifulSoup
+    
+    try:
+        if progress_callback:
+            progress_callback(f"🔍 Trying alternative method for: {query}")
+        
+        # This is a simplified approach that might work better
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+        
+        search_url = f"https://www.google.com/maps/search/{quote(query)}"
+        response = requests.get(search_url, headers=headers, timeout=30)
+        
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # Try to extract basic info
+            businesses = []
+            
+            # This is a very basic extraction - Google Maps makes this difficult
+            name_elements = soup.find_all(['h1', 'h2', 'h3'], class_=lambda x: x and any(keyword in str(x) for keyword in ['title', 'name', 'headline']))
+            
+            for name_elem in name_elements[:5]:
+                business_data = {
+                    "Name": name_elem.get_text().strip(),
+                    "Address": "N/A",
+                    "Phone": "N/A",
+                    "Website": "N/A",
+                    "Email": "N/A"
+                }
+                businesses.append(business_data)
+            
+            return businesses
+        else:
+            return []
+            
+    except Exception as e:
+        if progress_callback:
+            progress_callback("❌ Alternative method failed")
+        return []
 
 # ------------------------------
 # Streamlit UI
@@ -278,13 +216,16 @@ with st.sidebar:
     st.header("⚙️ Settings")
     query = st.text_input("Search query", "restaurants in mumbai", key="query")
     
+    method = st.selectbox("Scraping Method", ["Playwright (Recommended)", "Alternative"])
+    
     start_btn = st.button("🚀 Start Scraping", key="start_btn", type="primary", use_container_width=True)
     
     st.info("""
-    **Tips:** 
-    - Use specific queries like "restaurants mumbai"
-    - Include location for better results
-    - First run may take 3-5 minutes
+    **Recommended Queries:** 
+    - "restaurants mumbai"
+    - "hotels delhi" 
+    - "cafe bangalore"
+    - "it companies pune"
     """)
 
 # Main content
@@ -300,11 +241,17 @@ if start_btn:
         if progress is not None:
             progress_bar.progress(progress)
     
-    # Start scraping
-    scraped_data = scrape_google_maps_improved(
-        query, 
-        progress_callback=update_progress
-    )
+    # Start scraping based on selected method
+    if method == "Playwright (Recommended)":
+        scraped_data = scrape_google_maps_playwright(
+            query, 
+            progress_callback=update_progress
+        )
+    else:
+        scraped_data = scrape_google_maps_simple(
+            query,
+            progress_callback=update_progress
+        )
     
     st.session_state.scraped_data = scraped_data
     st.session_state.scraping_complete = True
@@ -321,17 +268,6 @@ if st.session_state.scraping_complete:
         # Display results
         st.dataframe(df, use_container_width=True, height=400)
         
-        # Show statistics
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Total Leads", len(df))
-        with col2:
-            emails = sum(1 for x in df['Email'] if x != "N/A")
-            st.metric("Emails Found", emails)
-        with col3:
-            websites = sum(1 for x in df['Website'] if x != "N/A")
-            st.metric("Websites", websites)
-        
         # Download button
         csv = df.to_csv(index=False).encode('utf-8')
         st.download_button(
@@ -343,28 +279,37 @@ if st.session_state.scraping_complete:
         )
     else:
         st.warning("""
-        ❌ No businesses found. Try:
-        - More specific queries: "restaurants mumbai" instead of "it"
-        - Different locations: "cafe delhi", "hotels bangalore"
-        - Wait a few minutes and try again
+        ❌ No businesses found. This could be because:
+        
+        1. **Google detected scraping** - Try again in a few minutes
+        2. **Query too broad** - Use specific queries like "restaurants mumbai"
+        3. **Location issues** - Try different cities: delhi, mumbai, bangalore
+        
+        💡 **Try these exact queries:**
+        - "restaurants in mumbai"
+        - "hotels in delhi"
+        - "cafe in bangalore"
+        - "it companies in pune"
         """)
 
 else:
     st.info("👆 Enter a search query and click 'Start Scraping'")
     
-    # Example queries
-    st.write("### 💡 Try these example queries:")
-    examples = [
+    # Quick action buttons
+    st.write("### 🚀 Quick Search:")
+    quick_queries = [
         "restaurants in mumbai",
-        "hotels in delhi",
+        "hotels in delhi", 
         "cafe in bangalore",
-        "it companies in pune",
-        "dentists in chennai"
+        "it companies in pune"
     ]
     
-    for example in examples:
-        if st.button(f"🔍 {example}", key=example):
-            st.session_state.query = example
+    cols = st.columns(2)
+    for i, q in enumerate(quick_queries):
+        with cols[i % 2]:
+            if st.button(f"🔍 {q}", key=f"quick_{i}"):
+                st.session_state.query = q
+                st.rerun()
 
 st.markdown("---")
-st.caption("Google Maps Lead Scraper - Real Business Data")
+st.caption("Google Maps Lead Scraper - Now with Playwright for better reliability")
